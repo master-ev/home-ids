@@ -22,8 +22,8 @@ def process(packet):
     else:
         protocols["other-IP"] += 1
 
-print("Capturing for 20 seconds...")
-sniff(iface="eth1", prn=process, filter="tcp or udp", timeout=20)
+print("Capturing for 30 seconds...")
+sniff(iface="eth1", prn=process, filter="tcp or udp", timeout=30)
 wrpcap("capture.pcap", captured)
 print("\nSaved capture.pcap")
 print("\nProtocol breakdown:")
