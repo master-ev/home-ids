@@ -1,3 +1,5 @@
 venv/
 __pycache__/
 *.pcap
+data/
+*.joblib
