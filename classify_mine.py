@@ -4,7 +4,7 @@ from scapy.all import rdpcap
 from collections import defaultdict
 from features import get_ips_ports, flow_key, compute_rich_features
 
-saved = joblib.load("ids_model_matched.joblib")
+saved = joblib.load("my_model.joblib")
 model = saved["model"]
 expected_features = saved["features"]
 print(f"Model expects {len(expected_features)} features:")
@@ -32,3 +32,7 @@ predictions = model.predict(X)
 for info, pred in zip(flow_info, predictions):
     src, dst, sport, dport, proto = info
     print(f"{proto} {src}:{sport} -> {dst}:{dport} => {pred}")
+
+from collections import Counter
+print("\nPrediction summary:")
+print(Counter(predictions))
