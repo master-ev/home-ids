@@ -88,10 +88,27 @@ def compute_rich_features(pkts):
     fwd_sizes = []
     bwd_sizes = []
     times = []
+    syn_count = 0
+    rst_count = 0
+    ack_count = 0
+    psh_count = 0
+    fin_count = 0
     for p in pkts:
         info = get_ips_ports(p)
         size = len(p)
         times.append(float(p.time))
+        if TCP in p:
+            flags = str(p[TCP].flags)
+            if "S" in flags:
+                syn_count += 1
+            if "R" in flags:
+                rst_count += 1
+            if "A" in flags:
+                ack_count += 1
+            if "P" in flags:
+                psh_count += 1
+            if "F" in flags:
+                fin_count += 1
         if info[0] == initiator_ip:
             fwd_sizes.append(size)
         else:
@@ -127,6 +144,11 @@ def compute_rich_features(pkts):
         "duration": round(duration, 4),
         "flow_bytes_per_sec": sum(all_sizes) / duration if duration > 0 else 0,
         "flow_packets_per_sec": len(all_sizes) / duration if duration > 0 else 0,
+        "syn_count": syn_count,
+        "rst_count": rst_count,
+        "ack_count": ack_count,
+        "psh_count": psh_count,
+        "fin_count": fin_count,
     }
 
 if __name__ == "__main__":

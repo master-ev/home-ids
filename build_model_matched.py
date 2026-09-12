@@ -23,6 +23,9 @@ FEATURE_MAP = {
     "Flow IAT Min": "flow_iat_min",
     "Flow Bytes/s": "flow_bytes_per_sec",
     "Flow Packets/s": "flow_packets_per_sec",
+    "FIN Flag Count": "fin_count",
+    "PSH Flag Count": "psh_count",
+    "ACK Flag Count": "ack_count",
 }
 
 cicids_cols = list(FEATURE_MAP.keys())

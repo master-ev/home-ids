@@ -9,7 +9,8 @@ model = saved["model"]
 expected_features = saved["features"]
 print(f"Model expects {len(expected_features)} features:")
 print(expected_features)
-packets = rdpcap("capture.pcap")
+# packets = rdpcap("capture.pcap")
+packets = rdpcap("scan.pcap")
 flows = defaultdict(list)
 for packet in packets:
     info = get_ips_ports(packet)
