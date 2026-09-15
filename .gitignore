@@ -3,3 +3,4 @@ __pycache__/
 *.pcap
 data/
 *.joblib
+alerts.jsonl

@@ -1,5 +1,6 @@
 import joblib
 import pandas as pd
+import json
 from scapy.all import sniff, conf
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -9,9 +10,14 @@ from features import get_ips_ports, flow_key, compute_rich_features
 conf.use_pcap = True
 INTERFACE = "eth1"
 WINDOW_SECONDS = 5
+ALERT_LOG = "alerts.jsonl"
 saved = joblib.load("my_model.joblib")
 classifier = saved["model"]
 clf_features = saved["features"]
+
+def log_alert(alert):
+    with open(ALERT_LOG, "a") as f:
+        f.write(json.dumps(alert) + "\n")
 
 from scapy.all import rdpcap
 def load_normal():
@@ -63,14 +69,19 @@ def analyze_window(packets):
         num_flows = data["count"]
         main_verdict = data["verdicts"].most_common(1)[0][0]
         if num_ports > 10:
-            kind = f"PORT SCAN ({num_ports} ports)"
+            kind = "port_scan"
+            desc = f"PORT SCAN({num_ports} ports)"
         elif num_flows > 10 and num_ports <= 3:
-            kind = f"BRUTE FORCE ({num_flows} attempts on port {list(data['ports'])})"
+            kind = "brute_force"
+            desc = f"BRUTE FORCE ({num_flows} attempts)"
         elif num_flows >= 5:
-            kind = f"{num_flows} suspicious flows"
+            kind = "suspicious"
+            desc = f"{num_flows} suspicious flows"
         else:
             continue
-        print(f"[{now}] ALERT: {kind} {src} -> {dst} (model: {main_verdict})")
+        timestamp = datetime.now().isoformat()
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} {src} -> {dst} (model: {main_verdict})")
+        log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict,})
 try:
     while True:
         packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp")
