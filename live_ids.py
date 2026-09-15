@@ -71,6 +71,9 @@ def analyze_window(packets):
         if num_ports > 10:
             kind = "port_scan"
             desc = f"PORT SCAN({num_ports} ports)"
+        elif main_verdict == "dos" and num_flows > 10:
+            kind = "dos"
+            desc = f"DoS FLOOD ({num_flows} flows)"
         elif num_flows > 10 and num_ports <= 3:
             kind = "brute_force"
             desc = f"BRUTE FORCE ({num_flows} attempts)"
