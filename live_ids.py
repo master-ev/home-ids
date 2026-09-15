@@ -1,7 +1,7 @@
 import joblib
 import pandas as pd
 from scapy.all import sniff, conf
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from sklearn.ensemble import IsolationForest
 from features import get_ips_ports, flow_key, compute_rich_features
@@ -41,6 +41,7 @@ def analyze_window(packets):
             flows[flow_key(info)].append(p)
     if not flows:
         return
+    campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter()})
     for key, pkts in flows.items():
         feats = compute_rich_features(pkts)
         feats["destination_port"] = get_ips_ports(pkts[0])[3]
@@ -50,11 +51,26 @@ def analyze_window(packets):
         anom_verdict = anomaly_model.predict(anom_row)[0]
         is_attack = (clf_verdict != "normal") or (anom_verdict == -1)
         if is_attack:
-            info = get_ips_ports(pkts[0])
-            src, dst, sport, dport, proto = info
+            src, dst, sport, dport, proto = get_ips_ports(pkts[0])
+            pair = (src, dst)
+            campaigns[pair]["ports"].add(dport)
+            campaigns[pair]["count"] += 1
             reason = clf_verdict if clf_verdict != "normal" else "anomaly"
-            now = datetime.now().strftime("%H:%M:%S")
-            print(f"[{now}] ALERT ({reason}): {proto} {src}:{sport} -> {dst}:{dport}")
+            campaigns[pair]["verdicts"][reason] += 1
+    now = datetime.now().strftime("%H:%M:%S")
+    for (src, dst), data in campaigns.items():
+        num_ports = len(data["ports"])
+        num_flows = data["count"]
+        main_verdict = data["verdicts"].most_common(1)[0][0]
+        if num_ports > 10:
+            kind = f"PORT SCAN ({num_ports} ports)"
+        elif num_flows > 10 and num_ports <= 3:
+            kind = f"BRUTE FORCE ({num_flows} attempts on port {list(data['ports'])})"
+        elif num_flows >= 5:
+            kind = f"{num_flows} suspicious flows"
+        else:
+            continue
+        print(f"[{now}] ALERT: {kind} {src} -> {dst} (model: {main_verdict})")
 try:
     while True:
         packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp")
