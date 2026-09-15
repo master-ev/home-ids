@@ -12,7 +12,9 @@ port_history = defaultdict(list)
 SLOW_SCAN_WINDOW = 300 # seconds
 SLOW_SCAN_THRESHOLD = 15
 slow_scan_alerted = set()
-
+dest_history = defaultdict(list)
+DEST_SCAN_THRESHOLD = 20
+dest_scan_alerted = set()
 
 conf.use_pcap = True
 INTERFACE = "eth1"
@@ -58,6 +60,16 @@ def check_slow_scan(src, dst, dport):
         return distinct_ports
     return None
 
+def check_dest_scan(dst, dport):
+    now = time.time()
+    dest_history[dst].append((dport, now))
+    dest_history[dst] = [(p, t) for (p, t) in dest_history[dst] if now - t < SLOW_SCAN_WINDOW]
+    distinct_ports = len(set(p for (p, t) in dest_history[dst]))
+    if distinct_ports >= DEST_SCAN_THRESHOLD and dst not in dest_scan_alerted:
+        dest_scan_alerted.add(dst)
+        return distinct_ports
+    return None
+
 def analyze_window(packets):
     flows = defaultdict(list)
     for p in packets:
@@ -81,6 +93,11 @@ def analyze_window(packets):
             now_str = datetime.now().strftime("%H:%M:%S")
             print(f"[{now_str}] ALERT: SLOW PORT SCAN ({slow} ports over time) {src} -> {dst}")
             log_alert({"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": f"SLOW PORT SCAN ({slow} ports over time)", "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan",})
+        dscan = check_dest_scan(dst, dport)
+        if dscan is not None:
+            now_str = datetime.now().strftime("%H:%M:%S")
+            print(f"[{now_str}] ALERT: DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}")
+            log_alert({"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": f"DISTRIBUTED SCAN ({dscan} ports on target)", "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan"})
         if is_attack:
             pair = (src, dst)
             campaigns[pair]["ports"].add(dport)
