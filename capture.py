@@ -22,9 +22,13 @@ def process(packet):
     else:
         protocols["other-IP"] += 1
 
-print("Capturing for 30 seconds...")
-sniff(iface="eth1", prn=process, filter="tcp or udp", timeout=30)
-wrpcap("capture.pcap", captured)
+print("Capturing for 300 seconds...")
+sniff(iface="eth1", prn=process, filter="tcp or udp", timeout=300)
+# wrpcap("capture.pcap", captured)
+# wrpcap("scan.pcap", captured)
+# wrpcap("normal.pcap", captured)
+# wrpcap("bruteforce.pcap", captured)
+wrpcap("normal_rich.pcap", captured)
 print("\nSaved capture.pcap")
 print("\nProtocol breakdown:")
 for proto, count in protocols.most_common():

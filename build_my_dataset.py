@@ -18,7 +18,8 @@ def flows_from_pcap(filename, label):
         rows.append(feats)
     return rows
 
-normal_rows = flows_from_pcap("normal.pcap", "normal")
+normal_rows = flows_from_pcap("normal_rich.pcap", "normal")
+normal_rows += flows_from_pcap("normal_web.pcap", "normal")
 scan_rows = flows_from_pcap("scan.pcap", "scan")
 brute_rows = flows_from_pcap("bruteforce.pcap", "bruteforce")
 dos_rows = flows_from_pcap("dos.pcap", "dos")
