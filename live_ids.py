@@ -4,8 +4,15 @@ import json
 from scapy.all import sniff, conf
 from collections import Counter, defaultdict
 from datetime import datetime
+import time
 from sklearn.ensemble import IsolationForest
 from features import get_ips_ports, flow_key, compute_rich_features
+
+port_history = defaultdict(list)
+SLOW_SCAN_WINDOW = 300 # seconds
+SLOW_SCAN_THRESHOLD = 15
+slow_scan_alerted = set()
+
 
 conf.use_pcap = True
 INTERFACE = "eth1"
@@ -39,6 +46,18 @@ anomaly_model = IsolationForest(contamination=0.15, random_state=42)
 anomaly_model.fit(normal[anomaly_features])
 
 print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
+
+def check_slow_scan(src, dst, dport):
+    now = time.time()
+    key = (src, dst)
+    port_history[key].append((dport, now))
+    port_history[key] = [(p, t) for (p, t) in port_history[key] if now - t < SLOW_SCAN_WINDOW]
+    distinct_ports = len(set(p for (p, t) in port_history[key]))
+    if distinct_ports >= SLOW_SCAN_THRESHOLD and key not in slow_scan_alerted:
+        slow_scan_alerted.add(key)
+        return distinct_ports
+    return None
+
 def analyze_window(packets):
     flows = defaultdict(list)
     for p in packets:
@@ -56,8 +75,13 @@ def analyze_window(packets):
         clf_verdict = classifier.predict(clf_row)[0]
         anom_verdict = anomaly_model.predict(anom_row)[0]
         is_attack = (clf_verdict != "normal") or (anom_verdict == -1)
+        src, dst, sport, dport, proto = get_ips_ports(pkts[0])
+        slow = check_slow_scan(src, dst, dport)
+        if slow is not None:
+            now_str = datetime.now().strftime("%H:%M:%S")
+            print(f"[{now_str}] ALERT: SLOW PORT SCAN ({slow} ports over time) {src} -> {dst}")
+            log_alert({"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": f"SLOW PORT SCAN ({slow} ports over time)", "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan",})
         if is_attack:
-            src, dst, sport, dport, proto = get_ips_ports(pkts[0])
             pair = (src, dst)
             campaigns[pair]["ports"].add(dport)
             campaigns[pair]["count"] += 1
