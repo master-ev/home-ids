@@ -82,28 +82,67 @@ th { color: var(--muted); font-weight: normal; }
 details summary { cursor: pointer; color: var(--purple); margin: 8px 0; }
 .empty { color: var(--muted); }
 code { color: var(--green); }
+.pattern { color: var(--purple); font-size: 13px; white-space: nowrap; }
+.small { color: var(--muted); font-size: 13px; }
 """
 
 
 def esc(value):
     return html.escape(str(value))
 
+def join_values(values):
+    escaped = []
+    index = 0
+    while index < len(values):
+        escaped.append(esc(values[index]))
+        index = index + 1
+    return ", ".join(escaped)
+
 def percent_of(value, maximum):
     if maximum == 0:
         return 0
     return int(value * FULL_WIDTH_PERCENT / maximum)
 
-def build_cards(incident_list, alert_count):
-    counts = inc.count_by_severity(incident_list)
-    total_incidents = len(incident_list)
+def build_cards(campaign_list, incident_count, alert_count):
+    counts = inc.count_by_severity(campaign_list)
+    total_campaigns = len(campaign_list)
     parts = []
     parts.append('<div class="cards">')
-    parts.append(f'<div class="card total"><div class="label">Incidents</div>'f'<div class="value">{total_incidents}</div></div>')
-    parts.append(f'<div class="card high"><div class="label">HIGH</div>'f'<div class="value">{counts[inc.SEVERITY_HIGH]}</div></div>')
-    parts.append(f'<div class="card medium"><div class="label">MEDIUM</div>'f'<div class="value">{counts[inc.SEVERITY_MEDIUM]}</div></div>')
-    parts.append(f'<div class="card low"><div class="label">LOW</div>'f'<div class="value">{counts[inc.SEVERITY_LOW]}</div></div>')
+    parts.append(f'<div class="card total"><div class="label">Campaigns</div>'f'<div class="value">{total_campaigns}</div></div>')
+    parts.append(f'<div class="card high"><div class="label">HIGH campaigns</div>'f'<div class="value">{counts[inc.SEVERITY_HIGH]}</div></div>')
+    parts.append(f'<div class="card medium"><div class="label">MEDIUM campaigns</div>'f'<div class="value">{counts[inc.SEVERITY_MEDIUM]}</div></div>')
+    parts.append(f'<div class="card low"><div class="label">LOW campaigns</div>'f'<div class="value">{counts[inc.SEVERITY_LOW]}</div></div>')
+    parts.append(f'<div class="card total"><div class="label">Incidents</div>'f'<div class="value">{incident_count}</div></div>')
     parts.append(f'<div class="card total"><div class="label">Raw alerts</div>'f'<div class="value">{alert_count}</div></div>')
     parts.append('</div>')
+    return "\n".join(parts)
+
+def build_campaign_table(campaign_list):
+    if len(campaign_list) == 0:
+        return '<p class="empty">No campaigns.</p>'
+    parts = []
+    parts.append('<table>')
+    parts.append('<tr><th>Severity</th><th>Pattern</th><th>Sources</th>''<th>Destinations</th><th>Types</th><th>Incidents</th>''<th>Alerts</th><th>Start</th><th>Duration</th></tr>')
+    index = 0
+    while index < len(campaign_list):
+        campaign = campaign_list[index]
+        severity = campaign["severity"]
+        start_text = inc.format_time(campaign["first_time"])
+        duration_text = inc.format_duration(campaign["duration"])
+        incident_total = len(campaign["incidents"])
+        parts.append('<tr>')
+        parts.append(f'<td><span class="badge {esc(severity)}">{esc(severity)}</span></td>')
+        parts.append(f'<td class="pattern">{esc(campaign["pattern"])}</td>')
+        parts.append(f'<td><code>{join_values(campaign["sources"])}</code></td>')
+        parts.append(f'<td class="small">{join_values(campaign["destinations"])}</td>')
+        parts.append(f'<td>{join_values(campaign["types"])}</td>')
+        parts.append(f'<td>{incident_total}</td>')
+        parts.append(f'<td>{campaign["alert_count"]}</td>')
+        parts.append(f'<td>{esc(start_text)}</td>')
+        parts.append(f'<td>{esc(duration_text)}</td>')
+        parts.append('</tr>')
+        index = index + 1
+    parts.append('</table>')
     return "\n".join(parts)
 
 def build_incident_table(incident_list):
@@ -203,7 +242,7 @@ def build_raw_alerts(alerts):
     return "\n".join(parts)
 
 
-def build_page(alerts, incident_list, source_path):
+def build_page(alerts, incident_list, campaign_list, source_path):
     generated = datetime.now().strftime(inc.TIME_FORMAT)
     type_counts = inc.count_by_type(incident_list)
     type_pairs = list(type_counts.items())
@@ -212,11 +251,13 @@ def build_page(alerts, incident_list, source_path):
     parts = []
     parts.append('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">')
     parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
-    parts.append('<title>Home IDS - Incidents</title>')
+    parts.append('<title>Home IDS - Campaigns</title>')
     parts.append('<style>' + CSS + '</style></head><body>')
-    parts.append('<h1>Home <span>IDS</span> - Incidents</h1>')
-    parts.append(f'<div class="subtitle">Source: <code>{esc(source_path)}</code> 'f'&middot; generated {esc(generated)}</div>')
-    parts.append(build_cards(incident_list, len(alerts)))
+    parts.append('<h1>Home <span>IDS</span> - Campaigns</h1>')
+    parts.append(f'<div class="subtitle">Source: <code>{esc(source_path)}</code> 'f'&middot; generated {esc(generated)} &middot; 'f'{len(alerts)} alerts &rarr; {len(incident_list)} incidents 'f'&rarr; {len(campaign_list)} campaigns</div>')
+    parts.append(build_cards(campaign_list, len(incident_list), len(alerts)))
+    parts.append('<h2>Campaigns (by priority)</h2>')
+    parts.append('<div class="panel">' + build_campaign_table(campaign_list) + '</div>')
     parts.append('<h2>Incidents (by priority)</h2>')
     parts.append('<div class="panel">' + build_incident_table(incident_list) + '</div>')
     parts.append('<h2>Incidents per day</h2>')
@@ -230,17 +271,19 @@ def build_page(alerts, incident_list, source_path):
     parts.append('</body></html>')
     return "\n".join(parts)
 
+
 def main():
     path = DEFAULT_ALERTS_PATH
     if len(sys.argv) > 1:
         path = sys.argv[1]
     alerts = inc.load_alerts(path)
     incident_list = inc.build_incidents(alerts)
-    page = build_page(alerts, incident_list, path)
+    campaign_list = inc.build_campaigns(incident_list)
+    page = build_page(alerts, incident_list, campaign_list, path)
     file = open(OUTPUT_PATH, "w")
     file.write(page)
     file.close()
-    print(f"{len(alerts)} alerts -> {len(incident_list)} incidents")
+    print(f"{len(alerts)} alerts -> {len(incident_list)} incidents "f"-> {len(campaign_list)} campaigns")
     print(f"Dashboard written to {OUTPUT_PATH}")
 
 if __name__ == "__main__":
