@@ -5,3 +5,4 @@ data/
 *.joblib
 alerts.jsonl
 dashboard.html
+sample_alerts.jsonl
