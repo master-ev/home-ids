@@ -14,6 +14,10 @@ SLOW_SCAN_THRESHOLD = 15
 slow_scan_alerted = set()
 dest_history = defaultdict(list)
 DEST_SCAN_THRESHOLD = 20
+SCAN_MIN_PORTS = 10
+MIN_ATTACK_FLOWS = 10
+FEW_PORTS_MAX = 3
+SUSPICIOUS_MIN_FLOWS = 5
 dest_scan_alerted = set()
 
 conf.use_pcap = True
@@ -109,16 +113,16 @@ def analyze_window(packets):
         num_ports = len(data["ports"])
         num_flows = data["count"]
         main_verdict = data["verdicts"].most_common(1)[0][0]
-        if num_ports > 10:
+        if num_ports >= SCAN_MIN_PORTS:
             kind = "port_scan"
             desc = f"PORT SCAN({num_ports} ports)"
-        elif main_verdict == "dos" and num_flows > 10:
+        elif main_verdict == "dos" and num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
             kind = "dos"
             desc = f"DoS FLOOD ({num_flows} flows)"
-        elif num_flows > 10 and num_ports <= 3:
+        elif num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
             kind = "brute_force"
             desc = f"BRUTE FORCE ({num_flows} attempts)"
-        elif num_flows >= 5:
+        elif num_flows >= SUSPICIOUS_MIN_FLOWS:
             kind = "suspicious"
             desc = f"{num_flows} suspicious flows"
         else:

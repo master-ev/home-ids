@@ -1,4 +1,5 @@
 import joblib
+import sys
 import pandas as pd
 from scapy.all import rdpcap
 from collections import defaultdict
@@ -10,7 +11,13 @@ expected_features = saved["features"]
 print(f"Model expects {len(expected_features)} features:")
 print(expected_features)
 # packets = rdpcap("capture.pcap")
-packets = rdpcap("scan.pcap")
+# packets = rdpcap("scan.pcap")
+DEFAULT_CAPTURE = "scan.pcap"
+capture_path = DEFAULT_CAPTURE
+if len(sys.argv) > 1:
+    capture_path = sys.argv[1]
+print(f"Classifying {capture_path}")
+packets = rdpcap(capture_path)
 flows = defaultdict(list)
 for packet in packets:
     info = get_ips_ports(packet)
