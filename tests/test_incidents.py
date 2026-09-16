@@ -113,3 +113,19 @@ def test_load_alerts_reads_real_format(tmp_path):
     assert alert["dst"] == "192.168.1.1"
     assert alert["type"] == "port_scan"
     assert alert["time"] != inc.NO_TIME
+
+NIGHT_SOURCES = ["10.0.0.1", "10.0.0.2", "192.168.1.236", "10.0.0.3", "10.0.0.4", "10.0.0.5"]
+NIGHT_DOS_OFFSET = 0
+NIGHT_SLOW_SCAN_OFFSET = 7
+NIGHT_TYPES_PER_SOURCE = 2
+
+def test_real_decoy_night_is_one_campaign():
+    alerts = []
+    for source in NIGHT_SOURCES:
+        alerts.append(make_alert(source, "dos", NIGHT_DOS_OFFSET, ROUTER))
+        alerts.append(make_alert(source, "slow_scan", NIGHT_SLOW_SCAN_OFFSET, ROUTER))
+    incident_list = inc.build_incidents(alerts)
+    campaign_list = inc.build_campaigns(incident_list)
+    assert len(incident_list) == len(NIGHT_SOURCES) * NIGHT_TYPES_PER_SOURCE
+    assert len(campaign_list) == 1
+    assert len(campaign_list[0]["sources"]) == len(NIGHT_SOURCES)
