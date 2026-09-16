@@ -4,12 +4,14 @@ from scapy.all import rdpcap
 from context import CONTEXT_FEATURES, compute_context
 from feature_sets import MISSING_VALUE, load_base_features
 from features import compute_rich_features, flow_key, get_ips_ports
+from scenarios import CAPTURES
 
 OUTPUT_PATH = "my_dataset_v2.csv"
 LABEL_COLUMN = "label"
 CAPTURE_COLUMN = "capture"
 PORT_INDEX = 3
-CAPTURES = [("normal.pcap", "normal"), ("scan.pcap", "scan"), ("bruteforce.pcap", "bruteforce"), ("dos.pcap", "dos"), ("decoy.pcap", "scan"),]
+MAX_FLOWS_PER_CAPTURE = 3000
+SAMPLE_SEED = 42
 
 def load_flows(path):
     packets = rdpcap(path)
@@ -57,7 +59,15 @@ def main():
             row[CAPTURE_COLUMN] = path
             all_rows.append(row)
         print(f"{path:<18} label={label:<11} flows={len(rows)}")
-    dataset = pd.DataFrame(all_rows)
+        full = pd.DataFrame(all_rows)
+    parts = []
+    for capture_name in full[CAPTURE_COLUMN].unique():
+        part = full[full[CAPTURE_COLUMN] == capture_name]
+        if len(part) > MAX_FLOWS_PER_CAPTURE:
+            part = part.sample(n=MAX_FLOWS_PER_CAPTURE, random_state=SAMPLE_SEED)
+            print(f"{capture_name}: sampled down to {MAX_FLOWS_PER_CAPTURE} flows")
+        parts.append(part)
+    dataset = pd.concat(parts, ignore_index=True)
     dataset.to_csv(OUTPUT_PATH, index=False)
     print()
     print(dataset[LABEL_COLUMN].value_counts())

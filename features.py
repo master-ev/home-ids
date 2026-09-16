@@ -85,6 +85,7 @@ def flow_key(info):
 def compute_rich_features(pkts):
     first_info = get_ips_ports(pkts[0])
     initiator_ip = first_info[0]
+    initiator_port = first_info[2]
     fwd_sizes = []
     bwd_sizes = []
     times = []
@@ -109,7 +110,8 @@ def compute_rich_features(pkts):
                 psh_count += 1
             if "F" in flags:
                 fin_count += 1
-        if info[0] == initiator_ip:
+        is_forward = info[0] == initiator_ip and info[2] == initiator_ip
+        if is_forward:
             fwd_sizes.append(size)
         else:
             bwd_sizes.append(size)
