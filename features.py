@@ -110,7 +110,7 @@ def compute_rich_features(pkts):
                 psh_count += 1
             if "F" in flags:
                 fin_count += 1
-        is_forward = info[0] == initiator_ip and info[2] == initiator_ip
+        is_forward = info[0] == initiator_ip and info[2] == initiator_port
         if is_forward:
             fwd_sizes.append(size)
         else:
@@ -118,7 +118,6 @@ def compute_rich_features(pkts):
     all_sizes = fwd_sizes + bwd_sizes
     times.sort()
     iats = [times[i+1] - times[i] for i in range(len(times) - 1)]
-
     def safe_stat(values, func):
         if len(values) < 1:
             return 0
