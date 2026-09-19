@@ -1,0 +1,6 @@
+scapy
+pandas
+scikit-learn
+imbalanced-learn
+joblib
+pytest
