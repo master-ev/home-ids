@@ -1,6 +1,7 @@
 import html
 import sys
 from datetime import datetime
+import time
 import incidents as inc
 
 DEFAULT_ALERTS_PATH = "alerts.jsonl"
@@ -8,6 +9,8 @@ OUTPUT_PATH = "dashboard.html"
 TOP_SOURCES_LIMIT = 5
 RAW_ALERTS_LIMIT = 50
 FULL_WIDTH_PERCENT = 100
+NO_REFRESH = 0
+DEFAULT_WATCH_SECONDS = 10 
 
 CSS = """
 :root {
@@ -275,7 +278,7 @@ def build_raw_alerts(alerts):
     return "\n".join(parts)
 
 
-def build_page(alerts, incident_list, campaign_list, source_path):
+def build_page(alerts, incident_list, campaign_list, source_path, refresh_seconds):
     generated = datetime.now().strftime(inc.TIME_FORMAT)
     type_counts = inc.count_by_type(incident_list)
     type_pairs = list(type_counts.items())
@@ -284,10 +287,15 @@ def build_page(alerts, incident_list, campaign_list, source_path):
     parts = []
     parts.append('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">')
     parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
+    if refresh_seconds > NO_REFRESH:
+        parts.append(f'<meta http-equiv="refresh" content="{refresh_seconds}">')
     parts.append('<title>Home IDS - Campaigns</title>')
     parts.append('<style>' + CSS + '</style></head><body>')
     parts.append('<h1>Home <span>IDS</span> - Campaigns</h1>')
-    parts.append(f'<div class="subtitle">Source: <code>{esc(source_path)}</code> 'f'&middot; generated {esc(generated)} &middot; 'f'{len(alerts)} alerts &rarr; {len(incident_list)} incidents 'f'&rarr; {len(campaign_list)} campaigns</div>')
+    live_text = ""
+    if refresh_seconds > NO_REFRESH:
+        live_text = f' &middot; <span style="color:var(--green)">live, refresh {refresh_seconds}s</span>'
+    parts.append(f'<div class="subtitle">Source: <code>{esc(source_path)}</code> ' f'&middot; generated {esc(generated)}{live_text} &middot; ' f'{len(alerts)} alerts &rarr; {len(incident_list)} incidents ' f'&rarr; {len(campaign_list)} campaigns</div>')
     parts.append(build_cards(campaign_list, incident_list, len(alerts)))
     parts.append('<h2>Campaigns (by priority)</h2>')
     parts.append('<div class="panel">' + build_campaign_table(campaign_list) + '</div>')
@@ -305,20 +313,47 @@ def build_page(alerts, incident_list, campaign_list, source_path):
     parts.append('</body></html>')
     return "\n".join(parts)
 
-
-def main():
-    path = DEFAULT_ALERTS_PATH
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
+def generate_once(path, refresh_seconds):
     alerts = inc.load_alerts(path)
     incident_list = inc.build_incidents(alerts)
     campaign_list = inc.build_campaigns(incident_list)
-    page = build_page(alerts, incident_list, campaign_list, path)
+    page = build_page(alerts, incident_list, campaign_list, path, refresh_seconds)
     file = open(OUTPUT_PATH, "w")
     file.write(page)
     file.close()
-    print(f"{len(alerts)} alerts -> {len(incident_list)} incidents "f"-> {len(campaign_list)} campaigns")
-    print(f"Dashboard written to {OUTPUT_PATH}")
+    return len(alerts), len(incident_list), len(campaign_list)
+
+
+def main():
+    path = DEFAULT_ALERTS_PATH
+    watch = False
+    refresh_seconds = NO_REFRESH
+    index = 1
+    while index < len(sys.argv):
+        argument = sys.argv[index]
+        if argument == "--watch":
+            watch = True
+            refresh_seconds = DEFAULT_WATCH_SECONDS
+        else:
+            path = argument
+        index = index + 1
+    if not watch:
+        alert_count, incident_count, campaign_count = generate_once(path, NO_REFRESH)
+        print(f"{alert_count} alerts -> {incident_count} incidents "
+              f"-> {campaign_count} campaigns")
+        print(f"Dashboard written to {OUTPUT_PATH}")
+        return
+    print(f"Watching {path}, regenerating {OUTPUT_PATH} every {refresh_seconds}s.")
+    print("Open dashboard.html in the browser; it reloads itself. Ctrl+C to stop.")
+    try:
+        while True:
+            alert_count, incident_count, campaign_count = generate_once(path, refresh_seconds)
+            stamp = datetime.now().strftime(inc.TIME_FORMAT)
+            print(f"[{stamp}] {alert_count} alerts -> {incident_count} incidents "
+                  f"-> {campaign_count} campaigns")
+            time.sleep(refresh_seconds)
+    except KeyboardInterrupt:
+        print("\nStopped watching.")
 
 if __name__ == "__main__":
     main()
