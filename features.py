@@ -1,6 +1,8 @@
 import statistics
-from scapy.all import rdpcap, IP, IPv6, TCP, UDP
+from scapy.all import rdpcap, IP, IPv6, TCP, UDP, ICMP
 from collections import defaultdict
+
+ICMP_NO_PORT = 0
 
 def get_ips_ports(packet):
     if IP in packet:
@@ -14,6 +16,8 @@ def get_ips_ports(packet):
         protocol, source_port, destination_port = "TCP", packet[TCP].sport, packet[TCP].dport
     elif UDP in packet:
         protocol, source_port, destination_port = "UDP", packet[UDP].sport, packet[UDP].dport
+    elif ICMP in packet:
+        protocol, source_port, destination_port = "ICMP", ICMP_NO_PORT, ICMP_NO_PORT
     else:
         return None
     return source_ip, destination_ip, source_port, destination_port, protocol

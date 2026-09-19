@@ -24,6 +24,8 @@ MIN_ATTACK_FLOWS = 10
 FEW_PORTS_MAX = 3
 SUSPICIOUS_MIN_FLOWS = 5
 dest_scan_alerted = set()
+ICMP_FLOOD_THRESHOLD = 100
+ICMP_PROTO = "ICMP"
 
 conf.use_pcap = True
 INTERFACE = active_interface(ROUTER_IP)
@@ -97,6 +99,16 @@ def check_dest_scan(dst, dport):
 
 def analyze_window(packets):
     flows = defaultdict(list)
+    icmp_counts = {}
+    for p in packets:
+        info = get_ips_ports(p)
+        if info is not None and info[4] == ICMP_PROTO:
+            src = info[0]
+            dst = info[1]
+            pair = (src, dst)
+            if pair not in icmp_counts:
+                icmp_counts[pair] = 0
+            icmp_counts[pair] = icmp_counts[pair] + 1
     for p in packets:
         info = get_ips_ports(p)
         if info is not None:
@@ -108,6 +120,9 @@ def analyze_window(packets):
     context_rows = compute_context(flow_list)
     position = 0
     for key, pkts in flows.items():
+        first_info = get_ips_ports(pkts[0])
+        if first_info is not None and first_info[4] == "ICMP":
+            continue
         feats = compute_rich_features(pkts)
         feats["destination_port"] = get_ips_ports(pkts[0])[3]
         context = context_rows[position]
@@ -131,6 +146,8 @@ def analyze_window(packets):
         anom_verdict = anomaly_model.predict(anom_row)[0]
         is_attack = (clf_verdict != "normal") or (anom_verdict == -1)
         src, dst, sport, dport, proto = get_ips_ports(pkts[0])
+        if proto == "ICMP":
+            continue
         slow = check_slow_scan(src, dst, dport)
         if slow is not None:
             now_str = datetime.now().strftime("%H:%M:%S")
@@ -154,7 +171,7 @@ def analyze_window(packets):
         num_ports = len(data["ports"])
         num_flows = data["count"]
         main_verdict = data["verdicts"].most_common(1)[0][0]
-        if main_verdict == "udp_scan" and num_flows >= SCAN_MIN_PORTS:
+        if main_verdict == "udp_scan" and num_flows >= SUSPICIOUS_MIN_FLOWS:
             kind = "udp_scan"
             desc = f"UDP SCAN({num_ports} ports)"
         elif num_ports >= SCAN_MIN_PORTS:
@@ -178,12 +195,19 @@ def analyze_window(packets):
             confidence_text = f" conf={confidence:.2f}"
         print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} " f"{src} -> {dst} (model: {main_verdict}{confidence_text})")
         log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence})
-
+    for pair, count in icmp_counts.items():
+        src, dst = pair
+        if count >= ICMP_FLOOD_THRESHOLD:
+            now_str = datetime.now().strftime("%H:%M:%S")
+            timestamp = datetime.now().isoformat()
+            desc = f"ICMP FLOOD ({count} packets)"
+            print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
+            log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
 def run_live():
     print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
     try:
         while True:
-            packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp")
+            packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp or icmp")
             analyze_window(packets)
     except KeyboardInterrupt:
         print("\nStopped")
