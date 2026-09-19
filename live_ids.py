@@ -7,7 +7,12 @@ from datetime import datetime
 import time
 from sklearn.ensemble import IsolationForest
 from features import get_ips_ports, flow_key, compute_rich_features
+from context import CONTEXT_FEATURES, compute_context
+from feature_sets import clean_features
+from net_iface import active_interface, ROUTER_IP
 
+USE_V2 = True
+V2_MODEL_PATH = "my_model_v2.joblib"
 port_history = defaultdict(list)
 SLOW_SCAN_WINDOW = 300 # seconds
 SLOW_SCAN_THRESHOLD = 15
@@ -21,10 +26,16 @@ SUSPICIOUS_MIN_FLOWS = 5
 dest_scan_alerted = set()
 
 conf.use_pcap = True
-INTERFACE = "eth1"
+INTERFACE = active_interface(ROUTER_IP)
+print(f"Auto-detected interface: {INTERFACE}")
 WINDOW_SECONDS = 5
 ALERT_LOG = "alerts.jsonl"
 saved = joblib.load("my_model.joblib")
+if USE_V2:
+    saved_v2 = joblib.load(V2_MODEL_PATH)
+    classifier_v2 = saved_v2["model"]
+    clf_features_v2 = saved_v2["features"]
+    print(f"Using v2 model (set {saved_v2.get('feature_set', '?')}, " f"{len(clf_features_v2)} features)")
 classifier = saved["model"]
 clf_features = saved["features"]
 
@@ -83,12 +94,24 @@ def analyze_window(packets):
     if not flows:
         return
     campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter()})
+    flow_list = list(flows.values())
+    context_rows = compute_context(flow_list)
+    position = 0
     for key, pkts in flows.items():
         feats = compute_rich_features(pkts)
         feats["destination_port"] = get_ips_ports(pkts[0])[3]
-        clf_row = pd.DataFrame([{n: feats.get(n, 0) for n in clf_features}])[clf_features]
+        context = context_rows[position]
+        for name in CONTEXT_FEATURES:
+            feats[name] = context[name]
+        position = position + 1
+        if USE_V2:
+            v2_row = pd.DataFrame([{n: feats.get(n, 0) for n in clf_features_v2}])[clf_features_v2]
+            v2_row = clean_features(v2_row)
+            clf_verdict = classifier_v2.predict(v2_row)[0]
+        else:
+            clf_row = pd.DataFrame([{n: feats.get(n, 0) for n in clf_features}])[clf_features]
+            clf_verdict = classifier.predict(clf_row)[0]
         anom_row = pd.DataFrame([{n: feats.get(n, 0) for n in anomaly_features}])[anomaly_features]
-        clf_verdict = classifier.predict(clf_row)[0]
         anom_verdict = anomaly_model.predict(anom_row)[0]
         is_attack = (clf_verdict != "normal") or (anom_verdict == -1)
         src, dst, sport, dport, proto = get_ips_ports(pkts[0])
