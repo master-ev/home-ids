@@ -37,6 +37,8 @@ SOURCE_KEYS = ["src", "src_ip", "source", "source_ip", "attacker", "ip"]
 DEST_KEYS = ["dst", "dst_ip", "destination", "dest", "target"]
 TYPE_KEYS = ["type", "attack_type", "attack", "label", "kind", "prediction"]
 TIME_KEYS = ["timestamp", "time", "ts", "window_start", "start"]
+CONFIDENCE_LOW = 0.60
+CONFIDENCE_KEYS = ["confidence", "conf", "probability", "score"]
 
 def get_field(alert, possible_keys):
     index = 0
@@ -82,6 +84,29 @@ def join_text(values):
         index = index + 1
     return ", ".join(parts)
 
+def parse_confidence(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+def average_confidence(values):
+    if len(values) == 0:
+        return None
+    total = 0.0
+    index = 0
+    while index < len(values):
+        total = total + values[index]
+        index = index + 1
+    return total / len(values)
+
+def is_low_confidence(confidence):
+    if confidence is None:
+        return False
+    return confidence < CONFIDENCE_LOW
+
 def parse_time(value):
     if value is None:
         return NO_TIME
@@ -112,6 +137,13 @@ def format_duration(seconds):
     rest = total_seconds % SECONDS_PER_MINUTE
     return f"{minutes}m {rest}s"
 
+def format_confidence(value):
+    if value is None:
+        return "conf=  -   "
+    if is_low_confidence(value):
+        return f"conf={value:.2f} LOW"
+    return f"conf={value:.2f}    "
+
 def load_alerts(path):
     alerts = []
     try:
@@ -140,13 +172,21 @@ def load_alerts(path):
         destination = get_field(raw, DEST_KEYS)
         attack_type = get_field(raw, TYPE_KEYS)
         timestamp = parse_time(get_field(raw, TIME_KEYS))
+        confidence = parse_confidence(get_field(raw, CONFIDENCE_KEYS))
         if source is None:
             source = UNKNOWN_VALUE
         if destination is None:
             destination = UNKNOWN_VALUE
         if attack_type is None:
             attack_type = UNKNOWN_VALUE
-        alert = {"src": str(source), "dst": str(destination), "type": str(attack_type).lower(), "time": timestamp, "raw": raw,}
+        alert = {
+            "src": str(source),
+            "dst": str(destination),
+            "type": str(attack_type).lower(),
+            "time": timestamp,
+            "confidence": confidence,
+            "raw": raw,
+        }
         alerts.append(alert)
     if skipped > 0:
         print(f"[!] Skipped {skipped} invalid lines")
@@ -195,7 +235,25 @@ def make_incident(group_alerts):
     alert_count = len(group_alerts)
     duration = last_alert["time"] - first_alert["time"]
     severity = compute_severity(first_alert["type"], alert_count)
-    incident = {"src": first_alert["src"], "destinations": destinations, "type": first_alert["type"], "severity": severity, "alert_count": alert_count, "first_time": first_alert["time"], "last_time": last_alert["time"], "duration": duration,}
+    confidences = []
+    index = 0
+    while index < len(group_alerts):
+        value = group_alerts[index].get("confidence")
+        if value is not None:
+            confidences.append(value)
+        index = index + 1
+    confidence = average_confidence(confidences)
+    incident = {
+        "src": first_alert["src"],
+        "destinations": destinations,
+        "type": first_alert["type"],
+        "severity": severity,
+        "alert_count": alert_count,
+        "confidence": confidence,
+        "first_time": first_alert["time"],
+        "last_time": last_alert["time"],
+        "duration": duration,
+    }
     return incident
 
 def build_incidents(alerts):
@@ -279,7 +337,7 @@ def add_to_campaign(campaign, incident):
         index = index + 1
 
 def new_campaign(incident):
-    campaign = {"first_time": incident["first_time"], "last_time": incident["last_time"], "sources": [], "destinations": [], "types": [], "incidents": [], "alert_count": 0, "severity": SEVERITY_LOW, "pattern": PATTERN_SINGLE, "duration": 0.0,}
+    campaign = {"first_time": incident["first_time"], "last_time": incident["last_time"], "sources": [], "destinations": [], "types": [], "incidents": [], "alert_count": 0, "severity": SEVERITY_LOW, "pattern": PATTERN_SINGLE, "duration": 0.0, "confidence": None,}
     add_to_campaign(campaign, incident)
     return campaign
 
@@ -294,6 +352,14 @@ def finish_campaign(campaign):
             highest_rank = rank
             highest_severity = severity
         index = index + 1
+    confidences = []
+    index = 0
+    while index < len(campaign["incidents"]):
+        value = campaign["incidents"][index]["confidence"]
+        if value is not None:
+            confidences.append(value)
+        index = index + 1
+    campaign["confidence"] = average_confidence(confidences)
     source_count = count_real_values(campaign["sources"])
     is_multi_source = source_count >= MULTI_SOURCE_MIN_SOURCES
     has_recon = types_contain(campaign["types"], RECON_MARKERS)
@@ -410,6 +476,13 @@ def print_report(path):
     print(f"Incidents  HIGH: {incident_counts[SEVERITY_HIGH]} | "f"MEDIUM: {incident_counts[SEVERITY_MEDIUM]} | "f"LOW: {incident_counts[SEVERITY_LOW]}")
     print(f"Campaigns  HIGH: {campaign_counts[SEVERITY_HIGH]} | "f"MEDIUM: {campaign_counts[SEVERITY_MEDIUM]} | "f"LOW: {campaign_counts[SEVERITY_LOW]}")
     print()
+    low_confidence_incidents = 0
+    index = 0
+    while index < len(incident_list):
+        if is_low_confidence(incident_list[index]["confidence"]):
+            low_confidence_incidents = low_confidence_incidents + 1
+        index = index + 1
+    print(f"Low-confidence incidents (model unsure): {low_confidence_incidents}")
     print(" Campaigns")
     index = 0
     while index < len(campaign_list):
@@ -417,7 +490,7 @@ def print_report(path):
         start_text = format_time(campaign["first_time"])
         duration_text = format_duration(campaign["duration"])
         incident_total = len(campaign["incidents"])
-        print(f"[{campaign['severity']:<6}] {campaign['pattern']:<27} "f"incidents={incident_total:<3} alerts={campaign['alert_count']:<4} "f"start={start_text} duration={duration_text}")
+        print(f"[{campaign['severity']:<6}] {campaign['pattern']:<27} " f"{format_confidence(campaign['confidence'])} " f"incidents={incident_total:<3} alerts={campaign['alert_count']:<4} " f"start={start_text} duration={duration_text}")
         print(f"sources: {join_text(campaign['sources'])}")
         print(f"types:   {join_text(campaign['types'])}")
         index = index + 1
@@ -428,7 +501,7 @@ def print_report(path):
         incident = incident_list[index]
         start_text = format_time(incident["first_time"])
         duration_text = format_duration(incident["duration"])
-        print(f"[{incident['severity']:<6}] {incident['src']:<16} "f"{incident['type']:<18} alerts={incident['alert_count']:<4} "f"start={start_text} duration={duration_text}")
+        print(f"[{incident['severity']:<6}] {incident['src']:<16} " f"{incident['type']:<18} {format_confidence(incident['confidence'])} " f"alerts={incident['alert_count']:<4} " f"start={start_text} duration={duration_text}")
         index = index + 1
 
 def main():

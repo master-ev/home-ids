@@ -8,6 +8,12 @@ SHORT_INTERVAL = 10
 SERIES_LENGTH = 4
 EPOCH_EXAMPLE = 1000
 REAL_ALERT_LINE = ('{"timestamp": "2026-09-15T04:51:12.603311", "kind": "port_scan", ''"description": "PORT SCAN(500 ports)", "source": "192.168.1.236", ''"destination": "192.168.1.1", "num_flows": 502, "num_ports": 500, ''"model_verdict": "scan"}')
+CONF_HIGH = 0.9
+CONF_LOW = 0.4
+CONF_A = 0.8
+CONF_B = 0.6
+CONF_AVERAGE = 0.7
+
 
 def make_alert(src, attack_type, seconds_after_base, dst):
     alert = {"src": src, "dst": dst, "type": attack_type, "time": BASE_TIME + seconds_after_base, "raw": {},}
@@ -129,3 +135,25 @@ def test_real_decoy_night_is_one_campaign():
     assert len(incident_list) == len(NIGHT_SOURCES) * NIGHT_TYPES_PER_SOURCE
     assert len(campaign_list) == 1
     assert len(campaign_list[0]["sources"]) == len(NIGHT_SOURCES)
+
+def make_alert_conf(src, attack_type, seconds_after_base, dst, confidence):
+    alert = make_alert(src, attack_type, seconds_after_base, dst)
+    alert["confidence"] = confidence
+    return alert
+
+
+def test_incident_averages_confidence():
+    alerts = [make_alert_conf(ATTACKER, "port_scan", 0, ROUTER, CONF_A), make_alert_conf(ATTACKER, "port_scan", SHORT_INTERVAL, ROUTER, CONF_B),]
+    incident_list = inc.build_incidents(alerts)
+    assert len(incident_list) == 1
+    assert abs(incident_list[0]["confidence"] - CONF_AVERAGE) < 0.001
+
+def test_missing_confidence_is_none():
+    alerts = make_series(ATTACKER, "port_scan", SERIES_LENGTH, SHORT_INTERVAL, 0, ROUTER)
+    incident_list = inc.build_incidents(alerts)
+    assert incident_list[0]["confidence"] is None
+
+def test_low_confidence_flag():
+    assert inc.is_low_confidence(CONF_LOW) is True
+    assert inc.is_low_confidence(CONF_HIGH) is False
+    assert inc.is_low_confidence(None) is False

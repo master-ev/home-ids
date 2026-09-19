@@ -39,6 +39,16 @@ if USE_V2:
 classifier = saved["model"]
 clf_features = saved["features"]
 
+def average_confidence(values):
+    if len(values) == 0:
+        return None
+    total = 0.0
+    index = 0
+    while index < len(values):
+        total = total + values[index]
+        index = index + 1
+    return round(total / len(values), 3)
+
 def log_alert(alert):
     with open(ALERT_LOG, "a") as f:
         f.write(json.dumps(alert) + "\n")
@@ -93,7 +103,7 @@ def analyze_window(packets):
             flows[flow_key(info)].append(p)
     if not flows:
         return
-    campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter()})
+    campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter(), "confidences": []})
     flow_list = list(flows.values())
     context_rows = compute_context(flow_list)
     position = 0
@@ -107,10 +117,16 @@ def analyze_window(packets):
         if USE_V2:
             v2_row = pd.DataFrame([{n: feats.get(n, 0) for n in clf_features_v2}])[clf_features_v2]
             v2_row = clean_features(v2_row)
-            clf_verdict = classifier_v2.predict(v2_row)[0]
+            probabilities = classifier_v2.predict_proba(v2_row)[0]
+            best_index = probabilities.argmax()
+            clf_verdict = classifier_v2.classes_[best_index]
+            confidence = float(probabilities[best_index])
         else:
             clf_row = pd.DataFrame([{n: feats.get(n, 0) for n in clf_features}])[clf_features]
-            clf_verdict = classifier.predict(clf_row)[0]
+            probabilities = classifier.predict_proba(clf_row)[0]
+            best_index = probabilities.argmax()
+            clf_verdict = classifier.classes_[best_index]
+            confidence = float(probabilities[best_index])
         anom_row = pd.DataFrame([{n: feats.get(n, 0) for n in anomaly_features}])[anomaly_features]
         anom_verdict = anomaly_model.predict(anom_row)[0]
         is_attack = (clf_verdict != "normal") or (anom_verdict == -1)
@@ -131,6 +147,8 @@ def analyze_window(packets):
             campaigns[pair]["count"] += 1
             reason = clf_verdict if clf_verdict != "normal" else "anomaly"
             campaigns[pair]["verdicts"][reason] += 1
+            if clf_verdict != "normal":
+                campaigns[pair]["confidences"].append(confidence)
     now = datetime.now().strftime("%H:%M:%S")
     for (src, dst), data in campaigns.items():
         num_ports = len(data["ports"])
@@ -151,8 +169,12 @@ def analyze_window(packets):
         else:
             continue
         timestamp = datetime.now().isoformat()
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} {src} -> {dst} (model: {main_verdict})")
-        log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict,})
+        confidence = average_confidence(data["confidences"])
+        confidence_text = ""
+        if confidence is not None:
+            confidence_text = f" conf={confidence:.2f}"
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} " f"{src} -> {dst} (model: {main_verdict}{confidence_text})")
+        log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence})
 try:
     while True:
         packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp")
