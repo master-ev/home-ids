@@ -84,11 +84,32 @@ details summary { cursor: pointer; color: var(--purple); margin: 8px 0; }
 code { color: var(--green); }
 .pattern { color: var(--purple); font-size: 13px; white-space: nowrap; }
 .small { color: var(--muted); font-size: 13px; }
+.badge.review {
+  background: #4a5164;
+  color: var(--text);
+  margin-left: 6px;
+}
+.conf { color: var(--muted); font-variant-numeric: tabular-nums; }
+.conf.low { color: var(--medium); font-weight: bold; }
+.conf.none { color: #4a5164; }
+.card.review { border-top: 4px solid #4a5164; }
 """
-
 
 def esc(value):
     return html.escape(str(value))
+
+def confidence_cell(value):
+    if value is None:
+        return '<td class="conf none">&ndash;</td>'
+    percent = int(round(value * 100))
+    if inc.is_low_confidence(value):
+        return f'<td class="conf low">{percent}%</td>'
+    return f'<td class="conf">{percent}%</td>'
+
+def review_badge(value):
+    if inc.is_low_confidence(value):
+        return '<span class="badge review">review</span>'
+    return ''
 
 def join_values(values):
     escaped = []
@@ -103,8 +124,15 @@ def percent_of(value, maximum):
         return 0
     return int(value * FULL_WIDTH_PERCENT / maximum)
 
-def build_cards(campaign_list, incident_count, alert_count):
+def build_cards(campaign_list, incident_list, alert_count):
+    incident_count = len(incident_list)
     counts = inc.count_by_severity(campaign_list)
+    to_review = 0
+    index = 0
+    while index < len(incident_list):
+        if inc.is_low_confidence(incident_list[index]["confidence"]):
+            to_review = to_review + 1
+        index = index + 1
     total_campaigns = len(campaign_list)
     parts = []
     parts.append('<div class="cards">')
@@ -114,6 +142,7 @@ def build_cards(campaign_list, incident_count, alert_count):
     parts.append(f'<div class="card low"><div class="label">LOW campaigns</div>'f'<div class="value">{counts[inc.SEVERITY_LOW]}</div></div>')
     parts.append(f'<div class="card total"><div class="label">Incidents</div>'f'<div class="value">{incident_count}</div></div>')
     parts.append(f'<div class="card total"><div class="label">Raw alerts</div>'f'<div class="value">{alert_count}</div></div>')
+    parts.append(f'<div class="card review"><div class="label">To review</div>' f'<div class="value">{to_review}</div></div>')
     parts.append('</div>')
     return "\n".join(parts)
 
@@ -122,7 +151,7 @@ def build_campaign_table(campaign_list):
         return '<p class="empty">No campaigns.</p>'
     parts = []
     parts.append('<table>')
-    parts.append('<tr><th>Severity</th><th>Pattern</th><th>Sources</th>''<th>Destinations</th><th>Types</th><th>Incidents</th>''<th>Alerts</th><th>Start</th><th>Duration</th></tr>')
+    parts.append('<tr><th>Severity</th><th>Pattern</th><th>Conf</th><th>Sources</th>' '<th>Destinations</th><th>Types</th><th>Incidents</th>' '<th>Alerts</th><th>Start</th><th>Duration</th></tr>')
     index = 0
     while index < len(campaign_list):
         campaign = campaign_list[index]
@@ -131,8 +160,10 @@ def build_campaign_table(campaign_list):
         duration_text = inc.format_duration(campaign["duration"])
         incident_total = len(campaign["incidents"])
         parts.append('<tr>')
-        parts.append(f'<td><span class="badge {esc(severity)}">{esc(severity)}</span></td>')
+        confidence = campaign["confidence"]
+        parts.append(f'<td><span class="badge {esc(severity)}">{esc(severity)}</span>' f'{review_badge(confidence)}</td>')
         parts.append(f'<td class="pattern">{esc(campaign["pattern"])}</td>')
+        parts.append(confidence_cell(confidence))
         parts.append(f'<td><code>{join_values(campaign["sources"])}</code></td>')
         parts.append(f'<td class="small">{join_values(campaign["destinations"])}</td>')
         parts.append(f'<td>{join_values(campaign["types"])}</td>')
@@ -150,7 +181,7 @@ def build_incident_table(incident_list):
         return '<p class="empty">No incidents.</p>'
     parts = []
     parts.append('<table>')
-    parts.append('<tr><th>Severity</th><th>Source</th><th>Type</th>''<th>Alerts</th><th>Start</th><th>End</th><th>Duration</th></tr>')
+    parts.append('<tr><th>Severity</th><th>Source</th><th>Type</th><th>Conf</th>' '<th>Alerts</th><th>Start</th><th>End</th><th>Duration</th></tr>')
     index = 0
     while index < len(incident_list):
         incident = incident_list[index]
@@ -159,9 +190,11 @@ def build_incident_table(incident_list):
         end_text = inc.format_time(incident["last_time"])
         duration_text = inc.format_duration(incident["duration"])
         parts.append('<tr>')
-        parts.append(f'<td><span class="badge {esc(severity)}">{esc(severity)}</span></td>')
+        confidence = incident["confidence"]
+        parts.append(f'<td><span class="badge {esc(severity)}">{esc(severity)}</span>' f'{review_badge(confidence)}</td>')
         parts.append(f'<td><code>{esc(incident["src"])}</code></td>')
         parts.append(f'<td>{esc(incident["type"])}</td>')
+        parts.append(confidence_cell(confidence))
         parts.append(f'<td>{incident["alert_count"]}</td>')
         parts.append(f'<td>{esc(start_text)}</td>')
         parts.append(f'<td>{esc(end_text)}</td>')
@@ -255,10 +288,11 @@ def build_page(alerts, incident_list, campaign_list, source_path):
     parts.append('<style>' + CSS + '</style></head><body>')
     parts.append('<h1>Home <span>IDS</span> - Campaigns</h1>')
     parts.append(f'<div class="subtitle">Source: <code>{esc(source_path)}</code> 'f'&middot; generated {esc(generated)} &middot; 'f'{len(alerts)} alerts &rarr; {len(incident_list)} incidents 'f'&rarr; {len(campaign_list)} campaigns</div>')
-    parts.append(build_cards(campaign_list, len(incident_list), len(alerts)))
+    parts.append(build_cards(campaign_list, incident_list, len(alerts)))
     parts.append('<h2>Campaigns (by priority)</h2>')
     parts.append('<div class="panel">' + build_campaign_table(campaign_list) + '</div>')
     parts.append('<h2>Incidents (by priority)</h2>')
+    parts.append('<div class="subtitle">Conf = model confidence. ' '<span class="badge review">review</span> marks low-confidence ' 'detections worth a manual check. A dash means a rule-based ' 'detection (no model score).</div>')
     parts.append('<div class="panel">' + build_incident_table(incident_list) + '</div>')
     parts.append('<h2>Incidents per day</h2>')
     parts.append('<div class="panel">' + build_day_chart(incident_list) + '</div>')
