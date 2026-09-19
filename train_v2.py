@@ -7,9 +7,9 @@ import feature_sets as fs
 DATASET_PATH = "my_dataset_v2.csv"
 MODEL_PATH = "my_model_v2.joblib"
 LABEL_COLUMN = "label"
-DEFAULT_SET = fs.SET_NO_DIRECTION_CONTEXT
 TREE_COUNT = 100
 RANDOM_SEED = 42
+DEFAULT_SET = fs.SET_FORWARD_CONTEXT
 
 def main():
     set_name = DEFAULT_SET

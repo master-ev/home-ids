@@ -154,7 +154,10 @@ def analyze_window(packets):
         num_ports = len(data["ports"])
         num_flows = data["count"]
         main_verdict = data["verdicts"].most_common(1)[0][0]
-        if num_ports >= SCAN_MIN_PORTS:
+        if main_verdict == "udp_scan" and num_flows >= SCAN_MIN_PORTS:
+            kind = "udp_scan"
+            desc = f"UDP SCAN({num_ports} ports)"
+        elif num_ports >= SCAN_MIN_PORTS:
             kind = "port_scan"
             desc = f"PORT SCAN({num_ports} ports)"
         elif main_verdict == "dos" and num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:

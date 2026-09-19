@@ -50,3 +50,22 @@ def test_different_windows_are_separate():
 
 def test_empty_input():
     assert ctx.compute_context([]) == []
+
+def test_reply_rate_high_when_replies_present():
+    flow_with_reply = [make_flow(ATTACKER, TARGET, FIRST_CLIENT_PORT, SAME_PORT, 0)[0],]
+    from scapy.all import IP, TCP
+    request = IP(src=ATTACKER, dst=TARGET) / TCP(sport=FIRST_CLIENT_PORT, dport=SAME_PORT, flags="S")
+    request.time = BASE_TIME
+    reply = IP(src=TARGET, dst=ATTACKER) / TCP(sport=SAME_PORT, dport=FIRST_CLIENT_PORT, flags="SA")
+    reply.time = BASE_TIME + 0.01
+    result = ctx.compute_context([[request, reply]])
+    assert result[0]["ctx_reply_rate"] == 1.0
+
+def test_reply_rate_zero_when_no_replies():
+    flow_list = []
+    index = 0
+    while index < SCAN_PORT_COUNT:
+        flow_list.append(make_flow(ATTACKER, TARGET, FIRST_CLIENT_PORT, index + 1, 0))
+        index = index + 1
+    result = ctx.compute_context(flow_list)
+    assert result[0]["ctx_reply_rate"] == 0.0
