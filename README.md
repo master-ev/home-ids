@@ -86,8 +86,8 @@ The active network interface is detected automatically (`net_iface.py`).
 
 ## Screenshots
 
-![dashboard_1](docs/dashboard_1.png)
-![dashboard_2](docs/dashboard_2.png)
+![Live dashboard 1](docs/dashboard_1.png)
+![Live dashboard 2](docs/dashboard_2.png)
 
 ## Design philosophy
 
