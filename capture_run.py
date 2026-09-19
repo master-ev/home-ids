@@ -16,6 +16,8 @@ MODE_NORMAL = "normal"
 MODE_DOS = "dos"
 MODE_BRUTEFORCE = "bruteforce"
 MIN_ARGUMENTS = 5
+MODE_SCAN = "scan"
+HOST_FILTER = "tcp and host 192.168.1.1"
 NORMAL_SITES = [
     "https://example.com",
     "https://www.wikipedia.org",
@@ -69,12 +71,18 @@ def run_traffic(mode, parameters):
         duration_seconds = int(parameters[0])
         delay_ms = int(parameters[1])
         traffic_gen.run_bruteforce(duration_seconds, delay_ms)
+    elif mode == MODE_SCAN:
+        duration_seconds = int(parameters[0])
+        print(f"Capturing for {duration_seconds}s. Launch nmap NOW in another terminal.")
+        time.sleep(duration_seconds)
     else:
         print(f"[!] Unknown mode: {mode}")
 
 def filter_for_mode(mode):
     if mode == MODE_NORMAL:
         return NORMAL_FILTER
+    if mode == MODE_SCAN:
+        return HOST_FILTER
     return PORT_FILTER
 
 def main():

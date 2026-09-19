@@ -175,9 +175,15 @@ def analyze_window(packets):
             confidence_text = f" conf={confidence:.2f}"
         print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} " f"{src} -> {dst} (model: {main_verdict}{confidence_text})")
         log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence})
-try:
-    while True:
-        packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp")
-        analyze_window(packets)
-except KeyboardInterrupt:
-    print("\nStopped")
+
+def run_live():
+    print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
+    try:
+        while True:
+            packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp")
+            analyze_window(packets)
+    except KeyboardInterrupt:
+        print("\nStopped")
+
+if __name__ == "__main__":
+    run_live()
