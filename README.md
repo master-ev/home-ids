@@ -1,8 +1,9 @@
 # Home IDS — Machine-Learning Intrusion Detection for a Home Network
 
 A real-time intrusion detection system for my own home network. It captures live
-traffic, groups it into flows, and uses two machine-learning approaches together:
-a **Random Forest classifier** for known attacks and an **Isolation Forest** for
+traffic, groups it into flows, and combines three complementary layers: a
+**Random Forest classifier** for known attack types, deterministic **trackers**
+for high-volume or multi-source patterns, and an **Isolation Forest** for
 anomalies. Detections are aggregated into incidents and campaigns, scored by
 severity and model confidence, and shown on a live dashboard.
 
@@ -11,11 +12,29 @@ myself against my own target — no abstract benchmark data.
 
 ## What it detects
 
-- **Port scans**, including evasive variants: slow scans (timing), decoy scans
-  (`nmap -D`), and distributed scans (many sources, one target)
-- **Brute-force** (repeated login attempts against my own server)
+- **Port scans (TCP)**, including evasive variants: slow scans (timing), decoy
+  scans (`nmap -D`), distributed scans (many sources, one target), and both
+  connect (`-sT`) and SYN (`-sS`) scans
+- **UDP scans** (`nmap -sU`)
 - **DoS** (flood against my own server)
+- **Brute-force** (repeated login attempts against my own server)
+- **ICMP flood** (ping flood — caught by a deterministic tracker, not the model)
 - **Anomalies** — traffic that does not match learned normal behaviour
+
+## How it works — three complementary layers
+
+Security is layers, each covering the others' blind spots:
+
+| Layer | Handles | Why |
+|---|---|---|
+| Random Forest classifier | scan / udp_scan / dos / bruteforce / normal | subtle per-flow + per-window patterns |
+| Deterministic trackers | slow scan, distributed scan, ICMP flood | obvious volume/multi-source cases a rule catches better |
+| Isolation Forest | unknown anomalies | what neither of the above was trained for |
+
+The ML model does the hard discrimination; rules handle what is plainly a matter
+of thresholds (thousands of pings, ports touched over time). Raw alerts are then
+aggregated → correlated into incidents → grouped into campaigns → prioritised by
+severity **and** model confidence, so the output is few good alerts, not noise.
 
 ## The story behind the model
 
@@ -28,30 +47,40 @@ switched from a random train/test split to **leave-one-capture-out** evaluation
 (hold out a whole capture, train on the rest), that same model scored **0.1%**
 on a scan it had never seen — it classified nearly every scan flow as DoS.
 
-The random split had hidden three real problems:
+The random split had hidden real problems: a **shortcut** (the model learned
+"no reply traffic = attack", an artifact of capturing DoS on `lo`), a
+**flow-direction bug** (direction decided by IP alone, wrong when both ends
+share an IP), and a **data-diversity gap** (each attack captured one way, so the
+model learned the capture's fingerprint — interface, tool, speed — not the
+behaviour).
 
-1. **A shortcut**: the model had learned "no reply traffic = attack", an artifact
-   of how DoS was captured (same IP on both ends of `lo`).
-2. **A direction bug**: flow direction was decided by IP alone, which is wrong when
-   both ends share an IP — every packet was counted backward.
-3. **A data-diversity gap**: attacks were captured one way each, so the model
-   learned the *capture's fingerprint* (interface, tool, speed), not the behaviour.
+The fixes were features and data, not model tricks: per-window **context
+features** (ports per source, flows per port, reply rate), an explicit
+**`is_tcp`** feature (protocol was implicit in flag counts and got diluted),
+correcting the direction, and adding **diverse captures** across sources, tools,
+and protocols. The result classifies every realistic attack type at ~95–100% on
+held-out captures, validated by leave-one-capture-out rather than a misleading
+random split.
 
-Fixing these — **context features** (ports per source per window), removing the
-shortcut features, correcting the direction, and adding diverse captures (including
-a second connect-scan) — produced a model that classifies **every realistic scan
-type at ~100% on held-out captures**, validated by leave-one-capture-out rather
-than a misleading random split.
+Recurring lessons, written up in [`notes/`](notes/):
 
-Full write-ups are in [`notes/`](notes/).
+- A random split can hide a model that generalizes to zero. Hold out whole
+  captures instead.
+- A traffic type needs *diverse* examples, not just present ones — this bit
+  three times (normal traffic, then UDP, then DNS).
+- A signal the model needs should be an *explicit* feature; left implicit, it
+  gets diluted by richer features.
+- Every features change invalidates old evaluation results — re-run it.
 
 ## Pipeline
-capture (scapy / tcpdump)
+
+capture (tcpdump / scapy)
 -> flows + rich features + per-window context (features.py, context.py)
--> Random Forest (v2, set C) + Isolation Forest (live_ids.py)
+-> Random Forest (set D) + trackers + Isolation Forest (live_ids.py)
 -> alerts with confidence (alerts.jsonl)
 -> incidents -> campaigns, severity + confidence (incidents.py, correlate.py)
 -> live dashboard (dashboard.py --watch)
+
 
 ## Running it
 
@@ -60,65 +89,52 @@ Requires Python 3.10, run inside WSL (Ubuntu). Capture needs `sudo`.
 ```bash
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
-# run the test suite
-venv/bin/python -m pytest -v          # 24 tests
-# live IDS (writes alerts to alerts.jsonl)
+
+# run the test suite (26 tests)
+venv/bin/python -m pytest -v
+
+# live IDS (writes alerts to alerts.jsonl); interface is auto-detected
 sudo venv/bin/python live_ids.py
+
 # live dashboard, in another terminal (regenerates + auto-refreshes)
-venv/bin/python dashboard.py --watch
-# then open dashboard.html in a browser
+venv/bin/python dashboard.py --watch      # then open dashboard.html
+
 # correlate the alert log into incidents and campaigns
 venv/bin/python correlate.py
 ```
-The active network interface is detected automatically (`net_iface.py`).
+
+The active network interface is detected automatically (`net_iface.py`), because
+under WSL mirrored networking it changes between sessions.
+
+## Repository layout
+
+Active pipeline is in the root. Earlier experiments (the abandoned CICIDS2017
+phase, first capture/flow prototypes, superseded capture scripts) are archived
+in [`legacy/`](legacy/) with their own README — kept for history, not part of
+the current system.
 
 ## Known limitations
 
-- **`lo` is not capturable in my WSL setup** (both tcpdump and scapy return 0
+- **`lo` is not capturable in this WSL setup** (tcpdump and scapy both return 0
   packets), so DoS and brute-force use single captures and are not
   leave-one-capture-out validated. Documented, not hidden.
-- **Localhost live**: brute-force/DoS test traffic runs on `lo`, while the live
-  IDS listens on the real interface, so those are validated on saved captures
-  rather than live.
-- **`normal_web` holdout ~83%**: web browsing is varied enough that a few flows
-  look unusual. Isolated false positives are filtered by aggregation and the
-  per-source/per-destination trackers.
+- **ICMP flood is rule-based, not ML**: ICMP has no ports, so all packets between
+  two hosts collapse into one flow — too few data points to learn a class. A
+  volume threshold is the right tool, and it lives alongside the other trackers.
+- **Unseen DNS ~77%**: on a DNS capture not in training, a few flows are still
+  misclassified. In-dataset DNS is 99–100%; isolated per-flow false positives are
+  filtered by aggregation into incidents.
 
 ## Screenshots
 
-![Live dashboard 1](docs/dashboard_1.png)
-![Live dashboard 2](docs/dashboard_2.png)
+![Live dashboard](docs/dashboard_1.png)
+![Incidents and campaigns](docs/dashboard_2.png)
 
 ## Design philosophy
 
 - A good IDS produces **few good alerts**, not many noisy ones: aggregate →
-  correlate → prioritise (by severity *and* model confidence).
-- A model is only as good as how representative its training data is (the
-  domain-gap and data-diversity lessons above).
-- Security is complementary layers: the ML classifier, the anomaly detector, and
-  deterministic trackers each cover the others' blind spots.
+  correlate → prioritise, by severity *and* model confidence.
+- A model is only as good as how representative its training data is.
+- Security is complementary layers: classifier, trackers, and anomaly detector
+  each cover the others' blind spots.
 - Heuristic detection flags suspicion, it does not prove intent.
-
-# Legacy / archived scripts
-
-These are earlier steps kept for history. They are **not** part of the current
-pipeline — see the main README for what is active.
-
-## CICIDS2017 phase (abandoned — domain gap)
-- `explore.py`, `prepare.py` — load and prepare the public CICIDS2017 dataset
-- `build_model.py`, `build_model_matched.py` — models trained on CICIDS features
-- `train.py`, `predict.py`, `compare.py` — early training/eval experiments
-
-A model trained on CICIDS did not detect my own attacks (features computed
-differently — the "domain gap"). The fix was to build my own labeled dataset;
-see `build_my_dataset.py` / `train_mine.py` in the main folder.
-
-## Early capture/flow experiments (superseded)
-- `sniff.py` — first packet sniffer
-- `flows.py`, `build_table.py` — first flow grouping and table building
-  (folded into `features.py`)
-
-## Old per-attack captures (superseded by capture_run.py)
-- `capture_brute.py`, `capture_dos.py`, `capture_decoy.py` — captured on `lo`
-  with scapy; replaced by `capture_run.py` (tcpdump + simultaneous traffic).
-ENDOFLEGACY
