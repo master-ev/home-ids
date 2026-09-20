@@ -11,6 +11,7 @@ from context import CONTEXT_FEATURES, compute_context
 from feature_sets import clean_features
 from net_iface import active_interface, ROUTER_IP
 
+MODEL_ALERT_MIN_CONFIDENCE = 0.70
 USE_V2 = True
 V2_MODEL_PATH = "my_model_v2.joblib"
 port_history = defaultdict(list)
@@ -26,6 +27,11 @@ SUSPICIOUS_MIN_FLOWS = 5
 dest_scan_alerted = set()
 ICMP_FLOOD_THRESHOLD = 100
 ICMP_PROTO = "ICMP"
+SLOWLORIS_MIN_CONNECTIONS = 20
+SLOWLORIS_MAX_PKTS_PER_CONN = 12
+SLOWLORIS_MIN_WINDOWS = 3
+slowloris_windows = defaultdict(int)
+slowloris_alerted = set()
 
 conf.use_pcap = True
 INTERFACE = active_interface(ROUTER_IP)
@@ -99,29 +105,47 @@ def check_dest_scan(dst, dport):
 
 def analyze_window(packets):
     flows = defaultdict(list)
-    icmp_counts = {}
-    for p in packets:
-        info = get_ips_ports(p)
-        if info is not None and info[4] == ICMP_PROTO:
-            src = info[0]
-            dst = info[1]
-            pair = (src, dst)
-            if pair not in icmp_counts:
-                icmp_counts[pair] = 0
-            icmp_counts[pair] = icmp_counts[pair] + 1
     for p in packets:
         info = get_ips_ports(p)
         if info is not None:
             flows[flow_key(info)].append(p)
     if not flows:
         return
-    campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter(), "confidences": []})
+    icmp_counts = {}
+    for p in packets:
+        info = get_ips_ports(p)
+        if info is not None and info[4] == ICMP_PROTO:
+            pair = (info[0], info[1])
+            if pair not in icmp_counts:
+                icmp_counts[pair] = 0
+            icmp_counts[pair] = icmp_counts[pair] + 1
+    slowloris_counts = {}
+    for key, pkts in flows.items():
+        info = get_ips_ports(pkts[0])
+        if info is None:
+            continue
+        src, dst, sport, dport, proto = info
+        if proto != "TCP":
+            continue
+        server_port = min(sport, dport)
+        if len(pkts) <= SLOWLORIS_MAX_PKTS_PER_CONN:
+            host_a = min(src, dst)
+            host_b = max(src, dst)
+            triple = (host_a, host_b, server_port)
+            if triple not in slowloris_counts:
+                slowloris_counts[triple] = 0
+            slowloris_counts[triple] = slowloris_counts[triple] + 1
+            if triple not in slowloris_counts:
+                slowloris_counts[triple] = 0
+            slowloris_counts[triple] = slowloris_counts[triple] + 1
     flow_list = list(flows.values())
     context_rows = compute_context(flow_list)
+    campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter(), "confidences": []})
     position = 0
     for key, pkts in flows.items():
         first_info = get_ips_ports(pkts[0])
-        if first_info is not None and first_info[4] == "ICMP":
+        if first_info is not None and first_info[4] == ICMP_PROTO:
+            position = position + 1
             continue
         feats = compute_rich_features(pkts)
         feats["destination_port"] = get_ips_ports(pkts[0])[3]
@@ -146,18 +170,16 @@ def analyze_window(packets):
         anom_verdict = anomaly_model.predict(anom_row)[0]
         is_attack = (clf_verdict != "normal") or (anom_verdict == -1)
         src, dst, sport, dport, proto = get_ips_ports(pkts[0])
-        if proto == "ICMP":
-            continue
         slow = check_slow_scan(src, dst, dport)
         if slow is not None:
             now_str = datetime.now().strftime("%H:%M:%S")
             print(f"[{now_str}] ALERT: SLOW PORT SCAN ({slow} ports over time) {src} -> {dst}")
-            log_alert({"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": f"SLOW PORT SCAN ({slow} ports over time)", "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan",})
+            log_alert({"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": f"SLOW PORT SCAN ({slow} ports over time)", "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None})
         dscan = check_dest_scan(dst, dport)
         if dscan is not None:
             now_str = datetime.now().strftime("%H:%M:%S")
             print(f"[{now_str}] ALERT: DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}")
-            log_alert({"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": f"DISTRIBUTED SCAN ({dscan} ports on target)", "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan"})
+            log_alert({"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": f"DISTRIBUTED SCAN ({dscan} ports on target)", "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None})
         if is_attack:
             pair = (src, dst)
             campaigns[pair]["ports"].add(dport)
@@ -166,7 +188,6 @@ def analyze_window(packets):
             campaigns[pair]["verdicts"][reason] += 1
             if clf_verdict != "normal":
                 campaigns[pair]["confidences"].append(confidence)
-    now = datetime.now().strftime("%H:%M:%S")
     for (src, dst), data in campaigns.items():
         num_ports = len(data["ports"])
         num_flows = data["count"]
@@ -193,6 +214,8 @@ def analyze_window(packets):
             continue
         timestamp = datetime.now().isoformat()
         confidence = average_confidence(data["confidences"])
+        if confidence is not None and confidence < MODEL_ALERT_MIN_CONFIDENCE:
+            continue
         confidence_text = ""
         if confidence is not None:
             confidence_text = f" conf={confidence:.2f}"
@@ -206,6 +229,20 @@ def analyze_window(packets):
             desc = f"ICMP FLOOD ({count} packets)"
             print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
             log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
+    for triple, count in slowloris_counts.items():
+        host_a, host_b, server_port = triple
+        if count >= SLOWLORIS_MIN_CONNECTIONS:
+            slowloris_windows[triple] = slowloris_windows[triple] + 1
+            if (slowloris_windows[triple] >= SLOWLORIS_MIN_WINDOWS and triple not in slowloris_alerted):
+                slowloris_alerted.add(triple)
+                now_str = datetime.now().strftime("%H:%M:%S")
+                timestamp = datetime.now().isoformat()
+                desc = f"SLOWLORIS ({count} slow connections on port {server_port})"
+                print(f"[{now_str}] ALERT: {desc} {host_a} <-> {host_b}")
+                log_alert({"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None})
+        else:
+            slowloris_windows[triple] = 0
+
 def run_live():
     print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
     try:

@@ -195,7 +195,7 @@ def load_alerts(path):
 def compute_severity(attack_type, alert_count):
     if DOS_MARKER in attack_type:
         return SEVERITY_HIGH
-    if "flood" in attack_type or DOS_MARKER in attack_type:
+    if "flood" in attack_type or "slowloris" in attack_type or DOS_MARKER in attack_type:
         return SEVERITY_HIGH
     if BRUTE_MARKER in attack_type:
         if alert_count >= BRUTEFORCE_HIGH_MIN_ALERTS:
