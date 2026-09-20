@@ -90,6 +90,8 @@ def compute_rich_features(pkts):
     first_info = get_ips_ports(pkts[0])
     initiator_ip = first_info[0]
     initiator_port = first_info[2]
+    protocol = first_info[4]
+    is_tcp = 1 if protocol == "TCP" else 0
     fwd_sizes = []
     bwd_sizes = []
     times = []
@@ -154,6 +156,7 @@ def compute_rich_features(pkts):
         "ack_count": ack_count,
         "psh_count": psh_count,
         "fin_count": fin_count,
+        "is_tcp": is_tcp,
     }
 
 if __name__ == "__main__":
