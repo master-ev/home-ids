@@ -1,7 +1,7 @@
 import joblib
 import pandas as pd
 import json
-from scapy.all import sniff, conf
+from scapy.all import sniff, conf, IP
 from collections import Counter, defaultdict
 from datetime import datetime
 import time
@@ -11,6 +11,8 @@ from context import CONTEXT_FEATURES, compute_context
 from feature_sets import clean_features
 from net_iface import active_interface, ROUTER_IP
 
+FRAGMENT_FLOOD_THRESHOLD = 30 
+frag_alerted = set()
 MODEL_ALERT_MIN_CONFIDENCE = 0.70
 USE_V2 = True
 V2_MODEL_PATH = "my_model_v2.joblib"
@@ -111,6 +113,16 @@ def analyze_window(packets):
             flows[flow_key(info)].append(p)
     if not flows:
         return
+    frag_counts = {}
+    for p in packets:
+        if IP in p:
+            more_fragments = int(p[IP].flags) & 1
+            has_offset = p[IP].frag != 0
+            if more_fragments or has_offset:
+                pair = (p[IP].src, p[IP].dst)
+                if pair not in frag_counts:
+                    frag_counts[pair] = 0
+                frag_counts[pair] = frag_counts[pair] + 1   
     icmp_counts = {}
     for p in packets:
         info = get_ips_ports(p)
@@ -229,6 +241,15 @@ def analyze_window(packets):
             desc = f"ICMP FLOOD ({count} packets)"
             print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
             log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
+    for pair, count in frag_counts.items():
+        src, dst = pair
+        if count >= FRAGMENT_FLOOD_THRESHOLD and pair not in frag_alerted:
+            frag_alerted.add(pair)
+            now_str = datetime.now().strftime("%H:%M:%S")
+            timestamp = datetime.now().isoformat()
+            desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
+            print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
+            log_alert({"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None})
     for triple, count in slowloris_counts.items():
         host_a, host_b, server_port = triple
         if count >= SLOWLORIS_MIN_CONNECTIONS:

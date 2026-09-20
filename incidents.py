@@ -197,6 +197,8 @@ def compute_severity(attack_type, alert_count):
         return SEVERITY_HIGH
     if "flood" in attack_type or "slowloris" in attack_type or DOS_MARKER in attack_type:
         return SEVERITY_HIGH
+    if "fragment" in attack_type:
+        return SEVERITY_MEDIUM
     if BRUTE_MARKER in attack_type:
         if alert_count >= BRUTEFORCE_HIGH_MIN_ALERTS:
             return SEVERITY_HIGH
