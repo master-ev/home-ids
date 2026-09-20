@@ -26,3 +26,8 @@ It worked on the first try (no diagnostic saga) because the lessons were applied
 upfront: 2 diverse captures, reuse of existing features (reply_rate, is_tcp,
 src_ports), verify-before-capture. Contrast with scan.pcap (day 40) and ICMP
 (day 48).
+
+## Cosmetic note
+Alerts show source 0.0.0.0: synflood.py uses send() with IP(dst=...) only,
+so scapy/kernel fills the source and it shows as 0.0.0.0 in the capture.
+Detection is unaffected; setting IP(src=...) explicitly would fix the label.
