@@ -58,8 +58,32 @@ if USE_V2:
     classifier_v2 = saved_v2["model"]
     clf_features_v2 = saved_v2["features"]
     print(f"Using v2 model (set {saved_v2.get('feature_set', '?')}, " f"{len(clf_features_v2)} features)")
-classifier = saved["model"]
-clf_features = saved["features"]
+classifier = None
+clf_features = None
+classifier_v2 = None
+clf_features_v2 = None
+anomaly_model = None
+anomaly_features = None
+
+def load_models():
+    global classifier, clf_features, classifier_v2, clf_features_v2
+    global anomaly_model, anomaly_features
+    require_file("my_model.joblib", "The base model. Build with build_my_dataset.py + train_mine.py.")
+    saved = joblib.load("my_model.joblib")
+    classifier = saved["model"]
+    clf_features = saved["features"]
+    if USE_V2:
+        require_file(V2_MODEL_PATH, "The v2 model. Build with build_dataset_v2.py + train_v2.py D.")
+        saved_v2 = joblib.load(V2_MODEL_PATH)
+        classifier_v2 = saved_v2["model"]
+        clf_features_v2 = saved_v2["features"]
+        print(f"Using v2 model (set {saved_v2.get('feature_set', '?')}, " f"{len(clf_features_v2)} features)")
+    require_file("normal.pcap", "A normal-traffic capture. Make one with capture_run.py.")
+    normal = load_normal()
+    anomaly_features = list(normal.columns)
+    anomaly_model_local = IsolationForest(contamination=0.15, random_state=42)
+    anomaly_model_local.fit(normal[anomaly_features])
+    anomaly_model = anomaly_model_local
 
 def average_confidence(values):
     if len(values) == 0:
@@ -119,6 +143,21 @@ def check_dest_scan(dst, dport):
     return None
 
 def analyze_window(packets):
+    for src, dst, count in trackers.fragment_alerts(packets):
+        pair = (src, dst)
+        if pair not in frag_alerted:
+            frag_alerted.add(pair)
+            now_str = datetime.now().strftime("%H:%M:%S")
+            timestamp = datetime.now().isoformat()
+            desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
+            print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
+            log_alert({"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None})
+    for src, dst, count in trackers.icmp_flood_alerts(packets):
+        now_str = datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.now().isoformat()
+        desc = f"ICMP FLOOD ({count} packets)"
+        print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
+        log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
     flows = defaultdict(list)
     for p in packets:
         info = get_ips_ports(p)
@@ -126,43 +165,6 @@ def analyze_window(packets):
             flows[flow_key(info)].append(p)
     if not flows:
         return
-    frag_counts = {}
-    for p in packets:
-        if IP in p:
-            more_fragments = int(p[IP].flags) & 1
-            has_offset = p[IP].frag != 0
-            if more_fragments or has_offset:
-                pair = (p[IP].src, p[IP].dst)
-                if pair not in frag_counts:
-                    frag_counts[pair] = 0
-                frag_counts[pair] = frag_counts[pair] + 1   
-    icmp_counts = {}
-    for p in packets:
-        info = get_ips_ports(p)
-        if info is not None and info[4] == ICMP_PROTO:
-            pair = (info[0], info[1])
-            if pair not in icmp_counts:
-                icmp_counts[pair] = 0
-            icmp_counts[pair] = icmp_counts[pair] + 1
-    slowloris_counts = {}
-    for key, pkts in flows.items():
-        info = get_ips_ports(pkts[0])
-        if info is None:
-            continue
-        src, dst, sport, dport, proto = info
-        if proto != "TCP":
-            continue
-        server_port = min(sport, dport)
-        if len(pkts) <= SLOWLORIS_MAX_PKTS_PER_CONN:
-            host_a = min(src, dst)
-            host_b = max(src, dst)
-            triple = (host_a, host_b, server_port)
-            if triple not in slowloris_counts:
-                slowloris_counts[triple] = 0
-            slowloris_counts[triple] = slowloris_counts[triple] + 1
-            if triple not in slowloris_counts:
-                slowloris_counts[triple] = 0
-            slowloris_counts[triple] = slowloris_counts[triple] + 1
     flow_list = list(flows.values())
     context_rows = compute_context(flow_list)
     campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter(), "confidences": []})
@@ -237,30 +239,15 @@ def analyze_window(packets):
             desc = f"{num_flows} suspicious flows"
         else:
             continue
-        timestamp = datetime.now().isoformat()
         confidence = average_confidence(data["confidences"])
         if confidence is not None and confidence < MODEL_ALERT_MIN_CONFIDENCE:
             continue
+        timestamp = datetime.now().isoformat()
         confidence_text = ""
         if confidence is not None:
             confidence_text = f" conf={confidence:.2f}"
         print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} " f"{src} -> {dst} (model: {main_verdict}{confidence_text})")
         log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence})
-    for src, dst, count in trackers.icmp_flood_alerts(packets):
-        now_str = datetime.now().strftime("%H:%M:%S")
-        timestamp = datetime.now().isoformat()
-        desc = f"ICMP FLOOD ({count} packets)"
-        print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
-        log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
-    for src, dst, count in trackers.fragment_alerts(packets):
-        pair = (src, dst)
-        if pair not in frag_alerted:
-            frag_alerted.add(pair)
-            now_str = datetime.now().strftime("%H:%M:%S")
-            timestamp = datetime.now().isoformat()
-            desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
-            print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
-            log_alert({"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None})
     for triple, count in trackers.slowloris_candidates(flow_list):
         slowloris_windows[triple] = slowloris_windows[triple] + 1
         if (slowloris_windows[triple] >= trackers.SLOWLORIS_MIN_WINDOWS and triple not in slowloris_alerted):
@@ -271,10 +258,9 @@ def analyze_window(packets):
             desc = f"SLOWLORIS ({count} slow connections on port {port})"
             print(f"[{now_str}] ALERT: {desc} {host_a} <-> {host_b}")
             log_alert({"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None})
-        else:
-            slowloris_windows[triple] = 0
 
 def run_live():
+    load_models()
     print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
     try:
         while True:
