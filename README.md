@@ -118,7 +118,10 @@ Requires Python 3.10, run inside WSL (Ubuntu). Capture needs `sudo`.
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 
-# run the test suite (26 tests)
+# check what's present and what you need to build
+venv/bin/python setup_check.py
+
+# run the test suite (34 tests)
 venv/bin/python -m pytest -v
 
 # live IDS (writes alerts to alerts.jsonl); interface is auto-detected
@@ -152,6 +155,10 @@ the current system.
 - **Unseen DNS ~77%**: on a DNS capture not in training, a few flows are still
   misclassified. In-dataset DNS is 99–100%; isolated per-flow false positives are
   filtered by aggregation into incidents.
+- **Captures are not in the repo**: the `.pcap` files are personal network
+  traffic and are gitignored, so the trained model cannot be reproduced without
+  capturing your own traffic. `setup_check.py` explains the steps. The code,
+  tests, and pipeline are fully present; only the data is local.
 
 ## Screenshots
 

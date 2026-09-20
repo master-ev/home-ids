@@ -2,6 +2,8 @@ import joblib
 import pandas as pd
 import json
 import trackers
+import os
+import sys
 from scapy.all import sniff, conf, IP
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -11,6 +13,13 @@ from features import get_ips_ports, flow_key, compute_rich_features
 from context import CONTEXT_FEATURES, compute_context
 from feature_sets import clean_features
 from net_iface import active_interface, ROUTER_IP
+
+def require_file(path, hint):
+    if not os.path.exists(path):
+        print(f"[!] Missing required file: {path}")
+        print(f"    {hint}")
+        print("    Run 'venv/bin/python setup_check.py' for the full checklist.")
+        sys.exit(1)
 
 FRAGMENT_FLOOD_THRESHOLD = 30 
 frag_alerted = set()
@@ -41,8 +50,10 @@ INTERFACE = active_interface(ROUTER_IP)
 print(f"Auto-detected interface: {INTERFACE}")
 WINDOW_SECONDS = 5
 ALERT_LOG = "alerts.jsonl"
+require_file("my_model.joblib", "The base model. Build it with build_my_dataset.py + train_mine.py.")
 saved = joblib.load("my_model.joblib")
 if USE_V2:
+    require_file(V2_MODEL_PATH, "The v2 model. Build it with build_dataset_v2.py + train_v2.py D.")
     saved_v2 = joblib.load(V2_MODEL_PATH)
     classifier_v2 = saved_v2["model"]
     clf_features_v2 = saved_v2["features"]
@@ -78,6 +89,7 @@ def load_normal():
         rows.append(f)
     return pd.DataFrame(rows)
 
+require_file("normal.pcap", "A normal-traffic capture. Make one with capture_run.py.")
 normal = load_normal()
 anomaly_features = list(normal.columns)
 anomaly_model = IsolationForest(contamination=0.15, random_state=42)
