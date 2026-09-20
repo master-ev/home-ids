@@ -1,6 +1,7 @@
 import joblib
 import pandas as pd
 import json
+import trackers
 from scapy.all import sniff, conf, IP
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -233,34 +234,31 @@ def analyze_window(packets):
             confidence_text = f" conf={confidence:.2f}"
         print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} " f"{src} -> {dst} (model: {main_verdict}{confidence_text})")
         log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence})
-    for pair, count in icmp_counts.items():
-        src, dst = pair
-        if count >= ICMP_FLOOD_THRESHOLD:
-            now_str = datetime.now().strftime("%H:%M:%S")
-            timestamp = datetime.now().isoformat()
-            desc = f"ICMP FLOOD ({count} packets)"
-            print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
-            log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
-    for pair, count in frag_counts.items():
-        src, dst = pair
-        if count >= FRAGMENT_FLOOD_THRESHOLD and pair not in frag_alerted:
+    for src, dst, count in trackers.icmp_flood_alerts(packets):
+        now_str = datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.now().isoformat()
+        desc = f"ICMP FLOOD ({count} packets)"
+        print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
+        log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
+    for src, dst, count in trackers.fragment_alerts(packets):
+        pair = (src, dst)
+        if pair not in frag_alerted:
             frag_alerted.add(pair)
             now_str = datetime.now().strftime("%H:%M:%S")
             timestamp = datetime.now().isoformat()
             desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
             print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
             log_alert({"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None})
-    for triple, count in slowloris_counts.items():
-        host_a, host_b, server_port = triple
-        if count >= SLOWLORIS_MIN_CONNECTIONS:
-            slowloris_windows[triple] = slowloris_windows[triple] + 1
-            if (slowloris_windows[triple] >= SLOWLORIS_MIN_WINDOWS and triple not in slowloris_alerted):
-                slowloris_alerted.add(triple)
-                now_str = datetime.now().strftime("%H:%M:%S")
-                timestamp = datetime.now().isoformat()
-                desc = f"SLOWLORIS ({count} slow connections on port {server_port})"
-                print(f"[{now_str}] ALERT: {desc} {host_a} <-> {host_b}")
-                log_alert({"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None})
+    for triple, count in trackers.slowloris_candidates(flow_list):
+        slowloris_windows[triple] = slowloris_windows[triple] + 1
+        if (slowloris_windows[triple] >= trackers.SLOWLORIS_MIN_WINDOWS and triple not in slowloris_alerted):
+            slowloris_alerted.add(triple)
+            host_a, host_b, port = triple
+            now_str = datetime.now().strftime("%H:%M:%S")
+            timestamp = datetime.now().isoformat()
+            desc = f"SLOWLORIS ({count} slow connections on port {port})"
+            print(f"[{now_str}] ALERT: {desc} {host_a} <-> {host_b}")
+            log_alert({"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None})
         else:
             slowloris_windows[triple] = 0
 
