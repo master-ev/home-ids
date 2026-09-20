@@ -174,6 +174,9 @@ def analyze_window(packets):
         if main_verdict == "udp_scan" and num_flows >= SUSPICIOUS_MIN_FLOWS:
             kind = "udp_scan"
             desc = f"UDP SCAN({num_ports} ports)"
+        elif main_verdict == "syn_flood" and num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
+            kind = "syn_flood"
+            desc = f"SYN FLOOD ({num_flows} half-open)"
         elif num_ports >= SCAN_MIN_PORTS:
             kind = "port_scan"
             desc = f"PORT SCAN({num_ports} ports)"
