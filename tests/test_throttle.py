@@ -1,0 +1,68 @@
+import pytest
+import live_ids
+from live_ids import cooldown_allows, emit_alert, ALERT_COOLDOWN_SECONDS
+from replay import read_logged_alerts
+
+START_TIME = 1000.0
+HALF_COOLDOWN = ALERT_COOLDOWN_SECONDS / 2
+SMALL_STEP = 1.0
+ATTACKER = "10.0.0.66"
+OTHER_ATTACKER = "10.0.0.77"
+VICTIM = "192.168.1.1"
+
+@pytest.fixture
+def throttle_log(tmp_path, monkeypatch):
+    live_ids.reset_live_state()
+    log_path = tmp_path / "alerts.jsonl"
+    monkeypatch.setattr(live_ids, "ALERT_LOG", str(log_path))
+    return str(log_path)
+
+def make_alert(kind, source):
+    return {"timestamp": "t", "kind": kind, "description": kind, "source": source, "destination": VICTIM, "num_flows": 1, "num_ports": 1, "model_verdict": kind, "confidence": None}
+
+def count_notified(alerts):
+    notified = 0
+    for alert in alerts:
+        if alert["notified"]:
+            notified = notified + 1
+    return notified
+
+def test_first_alert_is_always_allowed():
+    no_previous_notice = None
+    assert cooldown_allows(no_previous_notice, START_TIME, ALERT_COOLDOWN_SECONDS) is True
+
+def test_within_cooldown_is_blocked():
+    now = START_TIME + HALF_COOLDOWN
+    assert cooldown_allows(START_TIME, now, ALERT_COOLDOWN_SECONDS) is False
+
+def test_after_cooldown_is_allowed_again():
+    now = START_TIME + ALERT_COOLDOWN_SECONDS
+    assert cooldown_allows(START_TIME, now, ALERT_COOLDOWN_SECONDS) is True
+
+def test_repeats_are_logged_but_notified_once(throttle_log):
+    repeat_count = 3
+    for index in range(repeat_count):
+        now = START_TIME + index * SMALL_STEP
+        emit_alert(make_alert("port_scan", ATTACKER), "test", now)
+    alerts = read_logged_alerts(throttle_log)
+    assert len(alerts) == repeat_count
+    assert count_notified(alerts) == 1
+
+
+def test_next_notice_reports_suppressed_repeats(throttle_log):
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + 2 * SMALL_STEP)
+    after_cooldown = START_TIME + ALERT_COOLDOWN_SECONDS
+    emit_alert(make_alert("port_scan", ATTACKER), "test", after_cooldown)
+    alerts = read_logged_alerts(throttle_log)
+    last = alerts[-1]
+    assert last["notified"] is True
+    assert last["suppressed_repeats"] == 2
+
+def test_new_kind_or_new_source_is_notified_immediately(throttle_log):
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
+    emit_alert(make_alert("brute_force", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", OTHER_ATTACKER), "test", START_TIME + SMALL_STEP)
+    alerts = read_logged_alerts(throttle_log)
+    assert count_notified(alerts) == 3

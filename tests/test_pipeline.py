@@ -138,3 +138,24 @@ def test_stealth_replay_still_raises_slow_scan(alert_log):
     replay_capture(STEALTH_CAPTURE)
     alerts = read_logged_alerts(alert_log)
     assert len(alerts_of_kind(alerts, "slow_scan")) >= 1
+
+def alert_keys(alerts, only_notified):
+    keys = set()
+    for alert in alerts:
+        if only_notified and not alert.get("notified", True):
+            continue
+        keys.add((alert["source"], alert["destination"], alert["kind"]))
+    return keys
+
+def test_decoy_replay_notifies_every_key_but_fewer_alerts(alert_log):
+    require_capture(DECOY_CAPTURE)
+    replay_capture(DECOY_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    logged_keys = alert_keys(alerts, False)
+    notified_keys = alert_keys(alerts, True)
+    notified_count = 0
+    for alert in alerts:
+        if alert["notified"]:
+            notified_count = notified_count + 1
+    assert notified_keys == logged_keys
+    assert notified_count < len(alerts)

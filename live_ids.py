@@ -22,7 +22,6 @@ def require_file(path, hint):
         print(f"    {hint}")
         print("    Run 'venv/bin/python setup_check.py' for the full checklist.")
         sys.exit(1)
-
 FRAGMENT_FLOOD_THRESHOLD = 30
 frag_alerted = set()
 MODEL_ALERT_MIN_CONFIDENCE = 0.70
@@ -51,13 +50,15 @@ WINDOW_SECONDS = 5
 ALERT_LOG = "alerts.jsonl"
 NORMAL_LABEL = "normal"
 ANOMALY_VERDICT = "anomaly"
-ANOMALY_CONTAMINATION = 0.05
-ANOMALY_RANDOM_SEED = 42
 SCAN_VERDICT = "scan"
 DOS_VERDICT = "dos"
 FLOOD_MIN_FLOWS_PER_PORT = 5
 SCAN_MAX_FLOWS_PER_PORT = 3
-
+ANOMALY_CONTAMINATION = 0.05
+ANOMALY_RANDOM_SEED = 42
+ALERT_COOLDOWN_SECONDS = 60
+last_notified_time = {}
+suppressed_counts = defaultdict(int)
 classifier = None
 clf_features = None
 classifier_v2 = None
@@ -151,6 +152,35 @@ def log_alert(alert):
     with open(ALERT_LOG, "a") as f:
         f.write(json.dumps(alert) + "\n")
 
+def cooldown_allows(last_time, now, cooldown_seconds):
+    if last_time is None:
+        return True
+    elapsed = now - last_time
+    if elapsed >= cooldown_seconds:
+        return True
+    return False
+
+def emit_alert(alert, console_text, window_time):
+    key = (alert["source"], alert["destination"], alert["kind"])
+    last_time = last_notified_time.get(key)
+    notify = cooldown_allows(last_time, window_time, ALERT_COOLDOWN_SECONDS)
+    if notify:
+        repeats = suppressed_counts[key]
+        suppressed_counts[key] = 0
+        last_notified_time[key] = window_time
+        alert["notified"] = True
+        alert["suppressed_repeats"] = repeats
+        repeat_text = ""
+        if repeats > 0:
+            repeat_text = f" (+{repeats} similar since last notice)"
+        now_str = datetime.now().strftime("%H:%M:%S")
+        print(f"[{now_str}] ALERT: {console_text}{repeat_text}")
+    else:
+        suppressed_counts[key] = suppressed_counts[key] + 1
+        alert["notified"] = False
+    log_alert(alert)
+    return notify
+
 def check_slow_scan(src, dst, dport):
     now = time.time()
     key = (src, dst)
@@ -180,8 +210,10 @@ def reset_live_state():
     dest_scan_alerted.clear()
     slowloris_windows.clear()
     slowloris_alerted.clear()
+    last_notified_time.clear()
+    suppressed_counts.clear()
 
-def report_stealth_scans(packets):
+def report_stealth_scans(packets, window_time):
     stealth_input = extract_tcp_info(packets)
     stealth_alerts = detect_stealth_scans(stealth_input)
     stealth_sources = set()
@@ -197,10 +229,9 @@ def report_stealth_scans(packets):
         packet_count = stealth["packets"]
         port_count = stealth["ports"]
         desc = f"STEALTH SCAN ({types_text}, {packet_count} packets, {port_count} ports)"
-        now_str = datetime.now().strftime("%H:%M:%S")
         timestamp = datetime.now().isoformat()
-        print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
-        log_alert({"timestamp": timestamp, "kind": "stealth_scan", "description": desc, "source": src, "destination": dst, "num_flows": packet_count, "num_ports": port_count, "model_verdict": "stealth_scan", "confidence": None})
+        alert = {"timestamp": timestamp, "kind": "stealth_scan", "description": desc, "source": src, "destination": dst, "num_flows": packet_count, "num_ports": port_count, "model_verdict": "stealth_scan", "confidence": None}
+        emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
     return stealth_sources
 
 def flows_per_port(num_flows, num_ports):
@@ -223,7 +254,6 @@ def choose_campaign_label(main_verdict, num_flows, num_ports):
         return "syn_flood", f"SYN FLOOD ({num_flows} half-open)"
     if main_verdict == DOS_VERDICT and enough_attack_flows:
         if few_ports or looks_like_flood:
-        # if True:
             return "dos", f"DoS FLOOD ({num_flows} flows)"
     if main_verdict == SCAN_VERDICT and enough_suspicious_flows and looks_like_scan:
         return "port_scan", f"PORT SCAN({num_ports} ports)"
@@ -236,22 +266,23 @@ def choose_campaign_label(main_verdict, num_flows, num_ports):
     return None, None
 
 def analyze_window(packets):
+    if len(packets) == 0:
+        return
+    window_time = float(packets[0].time)
     for src, dst, count in trackers.fragment_alerts(packets):
         pair = (src, dst)
         if pair not in frag_alerted:
             frag_alerted.add(pair)
-            now_str = datetime.now().strftime("%H:%M:%S")
             timestamp = datetime.now().isoformat()
             desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
-            print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
-            log_alert({"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None})
+            alert = {"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None}
+            emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
     for src, dst, count in trackers.icmp_flood_alerts(packets):
-        now_str = datetime.now().strftime("%H:%M:%S")
         timestamp = datetime.now().isoformat()
         desc = f"ICMP FLOOD ({count} packets)"
-        print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
-        log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
-    stealth_sources = report_stealth_scans(packets)
+        alert = {"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None}
+        emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
+    stealth_sources = report_stealth_scans(packets, window_time)
     flows = defaultdict(list)
     for p in packets:
         info = get_ips_ports(p)
@@ -296,14 +327,14 @@ def analyze_window(packets):
         if is_scan_probe:
             slow = check_slow_scan(src, dst, dport)
             if slow is not None:
-                now_str = datetime.now().strftime("%H:%M:%S")
-                print(f"[{now_str}] ALERT: SLOW PORT SCAN ({slow} ports over time) {src} -> {dst}")
-                log_alert({"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": f"SLOW PORT SCAN ({slow} ports over time)", "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None})
+                desc = f"SLOW PORT SCAN ({slow} ports over time)"
+                alert = {"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": desc, "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None}
+                emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
             dscan = check_dest_scan(dst, dport)
             if dscan is not None:
-                now_str = datetime.now().strftime("%H:%M:%S")
-                print(f"[{now_str}] ALERT: DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}")
-                log_alert({"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": f"DISTRIBUTED SCAN ({dscan} ports on target)", "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None})
+                desc = f"DISTRIBUTED SCAN ({dscan} ports on target)"
+                alert = {"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": desc, "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None}
+                emit_alert(alert, f"DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}", window_time)
         if is_attack:
             pair = (src, dst)
             campaigns[pair]["ports"].add(dport)
@@ -319,7 +350,6 @@ def analyze_window(packets):
         num_ports = len(data["ports"])
         num_flows = data["count"]
         main_verdict = data["verdicts"].most_common(1)[0][0]
-
         kind, desc = choose_campaign_label(main_verdict, num_flows, num_ports)
         if kind is None:
             continue
@@ -334,26 +364,25 @@ def analyze_window(packets):
         confidence_text = ""
         if confidence is not None:
             confidence_text = f" conf={confidence:.2f}"
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: {desc} " f"{src} -> {dst} (model: {main_verdict}{confidence_text})")
-        log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence})
+        alert = {"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence}
+        emit_alert(alert, f"{desc} {src} -> {dst} (model: {main_verdict}{confidence_text})", window_time)
     for triple, count in trackers.slowloris_candidates(flow_list):
         slowloris_windows[triple] = slowloris_windows[triple] + 1
         if (slowloris_windows[triple] >= trackers.SLOWLORIS_MIN_WINDOWS
                 and triple not in slowloris_alerted):
             slowloris_alerted.add(triple)
             host_a, host_b, port = triple
-            now_str = datetime.now().strftime("%H:%M:%S")
             timestamp = datetime.now().isoformat()
             desc = f"SLOWLORIS ({count} slow connections on port {port})"
-            print(f"[{now_str}] ALERT: {desc} {host_a} <-> {host_b}")
-            log_alert({"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None})
+            alert = {"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None}
+            emit_alert(alert, f"{desc} {host_a} <-> {host_b}", window_time)
 
 def run_live():
     global INTERFACE
     INTERFACE = active_interface(ROUTER_IP)
     print(f"Auto-detected interface: {INTERFACE}")
     load_models()
-    print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
+    print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows, " f"notification cooldown {ALERT_COOLDOWN_SECONDS}s\n")
     try:
         while True:
             packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp or icmp")
