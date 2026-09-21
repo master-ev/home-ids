@@ -14,8 +14,8 @@ NORMAL_LABEL = "normal"
 TAIL_LINES = 15
 PYTEST_TAIL_LINES = 1
 LABEL_TO_KIND = {"port_scan": "port_scan", "scan": "port_scan", "udp_scan": "udp_scan", "dos": "dos", "brute_force": "brute_force", "bruteforce": "brute_force", "syn_flood": "syn_flood",}
-EXTRA_CASES = [("stealth_sX.pcap", "stealth_scan"), ("stealth_sN.pcap", "stealth_scan"), ("stealth_sF.pcap", "stealth_scan"), ("frag_scan.pcap", "fragmented_scan"), ("slowloris1.pcap", "slowloris"), ("slowloris2.pcap", "slowloris"), ("slowloris_test.pcap", "slowloris"),]
-EXTRA_NORMAL_CASES = ["dns_normal.pcap", "frag_normal.pcap"]
+EXTRA_CASES = [("stealth_sX.pcap", "stealth_scan"), ("stealth_sN.pcap", "stealth_scan"), ("stealth_sF.pcap", "stealth_scan"), ("frag_scan.pcap", "fragmented_scan"), ("slowloris1.pcap", "slowloris"), ("slowloris2.pcap", "slowloris"), ("slowloris_test.pcap", "slowloris"), ("frag_normal.pcap", "port_scan"), ("slowloris1.pcap", "slowloris"), ("slowloris_test.pcap", "slowloris"),]
+EXTRA_NORMAL_CASES = ["dns_normal.pcap"]
 
 def build_cases():
     attack_cases = []

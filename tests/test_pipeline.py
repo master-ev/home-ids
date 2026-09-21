@@ -12,6 +12,7 @@ NORMAL_CAPTURE = "normal.pcap"
 REQUIRED_MODEL_FILES = ["my_model.joblib", "my_model_v2.joblib", "normal.pcap"]
 STEALTH_SOURCE = "192.168.1.236"
 DNS_CAPTURES = ["normal_dns2.pcap", "dns_div2.pcap", "dns_div3.pcap", "dns_normal.pcap"]
+DECOY_CAPTURE = "decoy.pcap"
 
 def require_capture(path):
     if not os.path.exists(path):
@@ -29,6 +30,15 @@ def alerts_of_kind(alerts, kind):
         if alert["kind"] == kind:
             matching.append(alert)
     return matching
+
+def test_decoy_replay_labelled_port_scan_not_suspicious(alert_log):
+    require_capture(DECOY_CAPTURE)
+    replay_capture(DECOY_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    scans = alerts_of_kind(alerts, "port_scan")
+    vague = alerts_of_kind(alerts, "suspicious")
+    assert len(scans) >= 1
+    assert vague == []
 
 @pytest.fixture(scope="module")
 def models_loaded():
