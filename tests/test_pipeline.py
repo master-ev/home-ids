@@ -4,6 +4,7 @@ import pytest
 from scapy.all import rdpcap
 import live_ids
 from incidents import load_alerts, compute_severity, SEVERITY_MEDIUM
+from replay import split_into_windows, read_logged_alerts, replay_to_log
 
 STEALTH_CAPTURE = "stealth_sX.pcap"
 FRAGMENT_CAPTURE = "frag_scan.pcap"
@@ -15,41 +16,11 @@ def require_capture(path):
     if not os.path.exists(path):
         pytest.skip("capture not available: " + path)
 
-def split_into_windows(packets, window_seconds):
-    windows = []
-    if len(packets) == 0:
-        return windows
-    current = []
-    window_start = float(packets[0].time)
-    for pkt in packets:
-        pkt_time = float(pkt.time)
-        elapsed = pkt_time - window_start
-        if elapsed >= window_seconds:
-            windows.append(current)
-            current = []
-            window_start = pkt_time
-        current.append(pkt)
-    if len(current) > 0:
-        windows.append(current)
-    return windows
-
 def replay_capture(path):
     packets = rdpcap(path)
     windows = split_into_windows(packets, live_ids.WINDOW_SECONDS)
     for window in windows:
         live_ids.analyze_window(window)
-
-def read_logged_alerts(log_path):
-    alerts = []
-    if not os.path.exists(log_path):
-        return alerts
-    with open(log_path) as f:
-        for line in f:
-            stripped = line.strip()
-            if stripped == "":
-                continue
-            alerts.append(json.loads(stripped))
-    return alerts
 
 def alerts_of_kind(alerts, kind):
     matching = []
@@ -116,3 +87,11 @@ def test_logged_stealth_alert_gets_medium_severity(alert_log):
     assert len(stealth_types) >= 1
     severity = compute_severity(stealth_types[0], len(stealth_types))
     assert severity == SEVERITY_MEDIUM
+
+def test_replay_to_log_restores_alert_log(models_loaded, tmp_path):
+    require_capture(STEALTH_CAPTURE)
+    original_log = live_ids.ALERT_LOG
+    log_path = str(tmp_path / "metrics_alerts.jsonl")
+    alerts = replay_to_log(STEALTH_CAPTURE, log_path)
+    assert live_ids.ALERT_LOG == original_log
+    assert len(alerts) >= 1
