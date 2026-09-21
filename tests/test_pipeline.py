@@ -13,6 +13,8 @@ REQUIRED_MODEL_FILES = ["my_model.joblib", "my_model_v2.joblib", "normal.pcap"]
 STEALTH_SOURCE = "192.168.1.236"
 DNS_CAPTURES = ["normal_dns2.pcap", "dns_div2.pcap", "dns_div3.pcap", "dns_normal.pcap"]
 DECOY_CAPTURE = "decoy.pcap"
+SLOWLORIS_CAPTURE = "slowloris1.pcap"
+CONNECT_SCAN_CAPTURE = "scan_connect_router.pcap"
 
 def require_capture(path):
     if not os.path.exists(path):
@@ -114,3 +116,25 @@ def test_dns_replay_never_labelled_brute_force(alert_log, capture):
     alerts = read_logged_alerts(alert_log)
     brute = alerts_of_kind(alerts, "brute_force")
     assert brute == []    
+
+def test_slowloris_replay_raises_no_scan_tracker_alerts(alert_log):
+    require_capture(SLOWLORIS_CAPTURE)
+    replay_capture(SLOWLORIS_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert alerts_of_kind(alerts, "slow_scan") == []
+    assert alerts_of_kind(alerts, "distributed_scan") == []
+    assert len(alerts_of_kind(alerts, "slowloris")) >= 1
+
+
+def test_connect_scan_replay_still_raises_slow_scan(alert_log):
+    require_capture(CONNECT_SCAN_CAPTURE)
+    replay_capture(CONNECT_SCAN_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert len(alerts_of_kind(alerts, "slow_scan")) >= 1
+
+
+def test_stealth_replay_still_raises_slow_scan(alert_log):
+    require_capture(STEALTH_CAPTURE)
+    replay_capture(STEALTH_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert len(alerts_of_kind(alerts, "slow_scan")) >= 1

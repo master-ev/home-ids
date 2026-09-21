@@ -146,3 +146,12 @@ def detect_stealth_scans(tcp_packets):
             alert = {"src": src, "attack": "STEALTH SCAN", "scan_types": sorted(stats["types"]), "packets": stats["count"], "ports": port_count, "dsts": sorted(stats["dsts"]),}
             alerts.append(alert)
     return alerts
+
+def counts_as_scan_probe(first_tcp_flags):
+    if first_tcp_flags is None:
+        return True
+    base_flags = first_tcp_flags & TCP_BASE_FLAGS_MASK
+    has_ack = (base_flags & TCP_ACK) != 0
+    if has_ack:
+        return False
+    return True

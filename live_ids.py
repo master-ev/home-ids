@@ -80,6 +80,11 @@ def extract_tcp_info(packets):
         tcp_packets.append((src, dst, dport, flags))
     return tcp_packets
 
+def first_tcp_flags(pkt):
+    if TCP in pkt:
+        return int(pkt[TCP].flags)
+    return None
+
 def normal_capture_paths():
     paths = []
     for capture_name, label in CAPTURES:
@@ -286,16 +291,19 @@ def analyze_window(packets):
         anom_verdict = anomaly_model.predict(anom_row)[0]
         is_attack = (clf_verdict != NORMAL_LABEL) or (anom_verdict == -1)
         src, dst, sport, dport, proto = get_ips_ports(pkts[0])
-        slow = check_slow_scan(src, dst, dport)
-        if slow is not None:
-            now_str = datetime.now().strftime("%H:%M:%S")
-            print(f"[{now_str}] ALERT: SLOW PORT SCAN ({slow} ports over time) {src} -> {dst}")
-            log_alert({"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": f"SLOW PORT SCAN ({slow} ports over time)", "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None})
-        dscan = check_dest_scan(dst, dport)
-        if dscan is not None:
-            now_str = datetime.now().strftime("%H:%M:%S")
-            print(f"[{now_str}] ALERT: DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}")
-            log_alert({"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": f"DISTRIBUTED SCAN ({dscan} ports on target)", "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None})
+        flags_of_first = first_tcp_flags(pkts[0])
+        is_scan_probe = trackers.counts_as_scan_probe(flags_of_first)
+        if is_scan_probe:
+            slow = check_slow_scan(src, dst, dport)
+            if slow is not None:
+                now_str = datetime.now().strftime("%H:%M:%S")
+                print(f"[{now_str}] ALERT: SLOW PORT SCAN ({slow} ports over time) {src} -> {dst}")
+                log_alert({"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": f"SLOW PORT SCAN ({slow} ports over time)", "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None})
+            dscan = check_dest_scan(dst, dport)
+            if dscan is not None:
+                now_str = datetime.now().strftime("%H:%M:%S")
+                print(f"[{now_str}] ALERT: DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}")
+                log_alert({"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": f"DISTRIBUTED SCAN ({dscan} ports on target)", "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None})
         if is_attack:
             pair = (src, dst)
             campaigns[pair]["ports"].add(dport)

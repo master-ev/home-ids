@@ -1,5 +1,6 @@
 from scapy.all import IP, TCP, ICMP, Ether
 import trackers
+from trackers import counts_as_scan_probe
 
 ATTACKER = "192.168.1.244"
 TARGET = "192.168.1.1"
@@ -162,3 +163,18 @@ def test_sources_counted_separately():
     alerts = detect_stealth_scans(packets)
     assert len(alerts) == 1
     assert alerts[0]["src"] == ATTACKER
+
+def test_probes_count_for_scan_trackers():
+    xmas_flags = TCP_FIN | TCP_PSH | TCP_URG
+    probe_flags = [TCP_SYN, 0, TCP_FIN, xmas_flags]
+    for flags in probe_flags:
+        assert counts_as_scan_probe(flags) is True
+
+def test_replies_and_mid_connection_do_not_count():
+    reply_flags = [TCP_SYN | TCP_ACK, TCP_ACK, TCP_PSH | TCP_ACK, TCP_FIN | TCP_ACK, TCP_RST | TCP_ACK,]
+    for flags in reply_flags:
+        assert counts_as_scan_probe(flags) is False
+
+def test_udp_flows_keep_counting():
+    udp_has_no_tcp_flags = None
+    assert counts_as_scan_probe(udp_has_no_tcp_flags) is True

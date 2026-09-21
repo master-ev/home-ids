@@ -14,7 +14,7 @@ NORMAL_LABEL = "normal"
 TAIL_LINES = 15
 PYTEST_TAIL_LINES = 1
 LABEL_TO_KIND = {"port_scan": "port_scan", "scan": "port_scan", "udp_scan": "udp_scan", "dos": "dos", "brute_force": "brute_force", "bruteforce": "brute_force", "syn_flood": "syn_flood",}
-EXTRA_CASES = [("stealth_sX.pcap", "stealth_scan"), ("stealth_sN.pcap", "stealth_scan"), ("stealth_sF.pcap", "stealth_scan"), ("frag_scan.pcap", "fragmented_scan"), ("slowloris1.pcap", "slowloris"), ("slowloris2.pcap", "slowloris"), ("slowloris_test.pcap", "slowloris"), ("frag_normal.pcap", "port_scan"), ("slowloris1.pcap", "slowloris"), ("slowloris_test.pcap", "slowloris"),]
+EXTRA_CASES = [("stealth_sX.pcap", "stealth_scan"), ("stealth_sN.pcap", "stealth_scan"), ("stealth_sF.pcap", "stealth_scan"), ("frag_scan.pcap", "fragmented_scan"), ("frag_normal.pcap", "port_scan"), ("slowloris1.pcap", "slowloris"), ("slowloris_test.pcap", "slowloris"),]
 EXTRA_NORMAL_CASES = ["dns_normal.pcap"]
 
 def build_cases():
@@ -31,9 +31,14 @@ def build_cases():
             print("[!] No LABEL_TO_KIND mapping for label '" + label + "' (" + capture_name + ")")
         case = {"path": capture_name, "label": label, "expected": expected_kind, "in_training": True}
         attack_cases.append(case)
+    added_extra = set()
     for capture_name, expected_kind in EXTRA_CASES:
         if capture_name in scenario_files:
             continue
+        if capture_name in added_extra:
+            print("[!] Duplicate in EXTRA_CASES, skipped: " + capture_name)
+            continue
+        added_extra.add(capture_name)
         case = {"path": capture_name, "label": "-", "expected": expected_kind, "in_training": False}
         attack_cases.append(case)
     for capture_name in EXTRA_NORMAL_CASES:
