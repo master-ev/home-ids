@@ -159,3 +159,44 @@ def test_decoy_replay_notifies_every_key_but_fewer_alerts(alert_log):
             notified_count = notified_count + 1
     assert notified_keys == logged_keys
     assert notified_count < len(alerts)
+
+SCANNER = "192.168.1.236"
+ROUTER = "192.168.1.1"
+SLOWLORIS_REPEAT_CAPTURE = "slowloris_test.pcap"
+
+def first_packet_time(path):
+    packets = rdpcap(path, count=1)
+    return float(packets[0].time)
+
+def replay_in_time_order(paths):
+    ordered = sorted(paths, key=first_packet_time)
+    for path in ordered:
+        replay_capture(path)
+
+def count_alerts(alerts, kind, source, destination):
+    count = 0
+    for alert in alerts:
+        if alert["kind"] != kind:
+            continue
+        if source is not None and alert["source"] != source:
+            continue
+        if alert["destination"] != destination:
+            continue
+        count = count + 1
+    return count
+
+def test_same_scanner_days_apart_raises_scan_trackers_twice(alert_log):
+    require_capture(CONNECT_SCAN_CAPTURE)
+    require_capture(STEALTH_CAPTURE)
+    replay_in_time_order([CONNECT_SCAN_CAPTURE, STEALTH_CAPTURE])
+    alerts = read_logged_alerts(alert_log)
+    assert count_alerts(alerts, "slow_scan", SCANNER, ROUTER) == 2
+    assert count_alerts(alerts, "distributed_scan", None, ROUTER) == 2
+
+def test_same_slowloris_pair_two_captures_alerts_twice(alert_log):
+    require_capture(SLOWLORIS_CAPTURE)
+    require_capture(SLOWLORIS_REPEAT_CAPTURE)
+    replay_in_time_order([SLOWLORIS_CAPTURE, SLOWLORIS_REPEAT_CAPTURE])
+    alerts = read_logged_alerts(alert_log)
+    slowloris = alerts_of_kind(alerts, "slowloris")
+    assert len(slowloris) == 2

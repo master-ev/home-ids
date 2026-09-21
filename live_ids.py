@@ -7,7 +7,6 @@ import sys
 from scapy.all import sniff, conf, IP, rdpcap, TCP
 from collections import Counter, defaultdict
 from datetime import datetime
-import time
 from sklearn.ensemble import IsolationForest
 from features import get_ips_ports, flow_key, compute_rich_features
 from context import CONTEXT_FEATURES, compute_context
@@ -23,7 +22,6 @@ def require_file(path, hint):
         print("    Run 'venv/bin/python setup_check.py' for the full checklist.")
         sys.exit(1)
 FRAGMENT_FLOOD_THRESHOLD = 30
-frag_alerted = set()
 MODEL_ALERT_MIN_CONFIDENCE = 0.70
 USE_V2 = True
 V2_MODEL_PATH = "my_model_v2.joblib"
@@ -59,6 +57,10 @@ ANOMALY_RANDOM_SEED = 42
 ALERT_COOLDOWN_SECONDS = 60
 last_notified_time = {}
 suppressed_counts = defaultdict(int)
+FRAGMENT_EPISODE_GAP_SECONDS = 60
+SLOWLORIS_EPISODE_GAP_SECONDS = 60
+frag_last_seen = {}
+slowloris_last_seen = {}
 classifier = None
 clf_features = None
 classifier_v2 = None
@@ -160,6 +162,14 @@ def cooldown_allows(last_time, now, cooldown_seconds):
         return True
     return False
 
+def episode_starts(last_seen, now, gap_seconds):
+    if last_seen is None:
+        return True
+    pause = now - last_seen
+    if pause > gap_seconds:
+        return True
+    return False
+
 def emit_alert(alert, console_text, window_time):
     key = (alert["source"], alert["destination"], alert["kind"])
     last_time = last_notified_time.get(key)
@@ -181,35 +191,40 @@ def emit_alert(alert, console_text, window_time):
     log_alert(alert)
     return notify
 
-def check_slow_scan(src, dst, dport):
-    now = time.time()
+def check_slow_scan(src, dst, dport, now):
     key = (src, dst)
     port_history[key].append((dport, now))
     port_history[key] = [(p, t) for (p, t) in port_history[key] if now - t < SLOW_SCAN_WINDOW]
     distinct_ports = len(set(p for (p, t) in port_history[key]))
-    if distinct_ports >= SLOW_SCAN_THRESHOLD and key not in slow_scan_alerted:
-        slow_scan_alerted.add(key)
-        return distinct_ports
-    return None
+    if distinct_ports < SLOW_SCAN_THRESHOLD:
+        slow_scan_alerted.discard(key)
+        return None
+    if key in slow_scan_alerted:
+        return None
+    slow_scan_alerted.add(key)
+    return distinct_ports
 
-def check_dest_scan(dst, dport):
-    now = time.time()
+def check_dest_scan(dst, dport, now):
     dest_history[dst].append((dport, now))
     dest_history[dst] = [(p, t) for (p, t) in dest_history[dst] if now - t < SLOW_SCAN_WINDOW]
     distinct_ports = len(set(p for (p, t) in dest_history[dst]))
-    if distinct_ports >= DEST_SCAN_THRESHOLD and dst not in dest_scan_alerted:
-        dest_scan_alerted.add(dst)
-        return distinct_ports
-    return None
+    if distinct_ports < DEST_SCAN_THRESHOLD:
+        dest_scan_alerted.discard(dst)
+        return None
+    if dst in dest_scan_alerted:
+        return None
+    dest_scan_alerted.add(dst)
+    return distinct_ports
 
 def reset_live_state():
-    frag_alerted.clear()
     port_history.clear()
     slow_scan_alerted.clear()
     dest_history.clear()
     dest_scan_alerted.clear()
     slowloris_windows.clear()
     slowloris_alerted.clear()
+    frag_last_seen.clear()
+    slowloris_last_seen.clear()
     last_notified_time.clear()
     suppressed_counts.clear()
 
@@ -271,18 +286,22 @@ def analyze_window(packets):
     window_time = float(packets[0].time)
     for src, dst, count in trackers.fragment_alerts(packets):
         pair = (src, dst)
-        if pair not in frag_alerted:
-            frag_alerted.add(pair)
-            timestamp = datetime.now().isoformat()
-            desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
-            alert = {"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None}
-            emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
+        last_seen = frag_last_seen.get(pair)
+        frag_last_seen[pair] = window_time
+        new_episode = episode_starts(last_seen, window_time, FRAGMENT_EPISODE_GAP_SECONDS)
+        if not new_episode:
+            continue
+        timestamp = datetime.now().isoformat()
+        desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
+        alert = {"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None}
+        emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
     for src, dst, count in trackers.icmp_flood_alerts(packets):
         timestamp = datetime.now().isoformat()
         desc = f"ICMP FLOOD ({count} packets)"
         alert = {"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None}
         emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
     stealth_sources = report_stealth_scans(packets, window_time)
+
     flows = defaultdict(list)
     for p in packets:
         info = get_ips_ports(p)
@@ -325,12 +344,12 @@ def analyze_window(packets):
         flags_of_first = first_tcp_flags(pkts[0])
         is_scan_probe = trackers.counts_as_scan_probe(flags_of_first)
         if is_scan_probe:
-            slow = check_slow_scan(src, dst, dport)
+            slow = check_slow_scan(src, dst, dport, window_time)
             if slow is not None:
                 desc = f"SLOW PORT SCAN ({slow} ports over time)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": desc, "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None}
                 emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
-            dscan = check_dest_scan(dst, dport)
+            dscan = check_dest_scan(dst, dport, window_time)
             if dscan is not None:
                 desc = f"DISTRIBUTED SCAN ({dscan} ports on target)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": desc, "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None}
@@ -367,9 +386,14 @@ def analyze_window(packets):
         alert = {"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence}
         emit_alert(alert, f"{desc} {src} -> {dst} (model: {main_verdict}{confidence_text})", window_time)
     for triple, count in trackers.slowloris_candidates(flow_list):
+        last_seen = slowloris_last_seen.get(triple)
+        slowloris_last_seen[triple] = window_time
+        if episode_starts(last_seen, window_time, SLOWLORIS_EPISODE_GAP_SECONDS):
+            slowloris_windows[triple] = 0
+            slowloris_alerted.discard(triple)
         slowloris_windows[triple] = slowloris_windows[triple] + 1
-        if (slowloris_windows[triple] >= trackers.SLOWLORIS_MIN_WINDOWS
-                and triple not in slowloris_alerted):
+        enough_windows = slowloris_windows[triple] >= trackers.SLOWLORIS_MIN_WINDOWS
+        if enough_windows and triple not in slowloris_alerted:
             slowloris_alerted.add(triple)
             host_a, host_b, port = triple
             timestamp = datetime.now().isoformat()
