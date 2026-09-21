@@ -28,3 +28,14 @@ days could reach 3 windows -> false alert), and scan trackers used time.time().
 ## Results
 metrics.md identical except the header (one episode per capture): the fix only
 changes what happens BETWEEN attacks. Tests: 85 -> 93.
+
+## Red first
+Before the fix, chronological replay without reset:
+- scan_connect_router + stealth_sX: slow_scan assert 1 == 2 (second scan ignored)
+- slowloris1 + slowloris_test: slowloris assert 1 == 2
+After the fix: exactly 2 each (not 1 = latch stuck, not hundreds = no latch).
+
+## Gap choice (diagnose_episodes.py)
+Longest pause inside one attack: frag_scan 5.1 s, slowloris1 5.9 s,
+slowloris_test 5.9 s, dos 5.0 s, syn_flood1 5.1 s (about one window).
+Gap 60 s = ~10x margin; a real slowloris with 15 s keep-alive still fits.
