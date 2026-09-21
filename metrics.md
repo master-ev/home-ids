@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-21 20:17 at commit `8a608ae` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-21 23:43 at commit `5905f57` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
@@ -12,7 +12,9 @@ Generated 2026-09-21 20:17 at commit `8a608ae` (+ uncommitted changes) by `metri
 
 - **Unseen attack captures**: detected 6/7, correctly labelled 6/7
 - **In-training attack captures**: detected 12/12, correctly labelled 10/12
-- **Normal captures with any alert**: 4/11 (12 alerts total)
+- **Normal captures with any alert**: 1/11 (4 alerts total)
+Since day 63 the IsolationForest is trained on the scenario normal captures,
+so for them this is in-sample. `dns_normal.pcap` and `frag_normal.pcap` are held out.
 
 ## Attack captures
 
@@ -47,17 +49,17 @@ Generated 2026-09-21 20:17 at commit `8a608ae` (+ uncommitted changes) by `metri
 | normal_stream.pcap | 0 | - |
 | normal_mixed.pcap | 0 | - |
 | normal_dns1.pcap | 0 | - |
-| normal_dns2.pcap | 2 | brute_force x2 |
+| normal_dns2.pcap | 0 | - |
 | dns_div1.pcap | 0 | - |
-| dns_div2.pcap | 5 | brute_force x3, suspicious x2 |
-| dns_div3.pcap | 1 | brute_force x1 |
+| dns_div2.pcap | 0 | - |
+| dns_div3.pcap | 0 | - |
 | dns_normal.pcap | 0 | - |
 | frag_normal.pcap | 4 | distributed_scan x1, port_scan x2, slow_scan x1 |
 
 ## Tests
 
 ```
-57 passed in 81.91s (0:01:21)
+66 passed in 101.59s (0:01:41)
 ```
 
 ## LOCO (model generalization, last lines)
