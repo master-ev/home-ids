@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-21 23:43 at commit `5905f57` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-22 00:20 at commit `722b55e` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
@@ -10,9 +10,9 @@ Generated 2026-09-21 23:43 at commit `5905f57` (+ uncommitted changes) by `metri
 
 ## Summary
 
-- **Unseen attack captures**: detected 6/7, correctly labelled 6/7
-- **In-training attack captures**: detected 12/12, correctly labelled 10/12
-- **Normal captures with any alert**: 1/11 (4 alerts total)
+- **Unseen attack captures**: detected 9/10, correctly labelled 9/10
+- **In-training attack captures**: detected 12/12, correctly labelled 12/12
+- **Normal captures with any alert**: 0/10 (0 alerts total)
 Since day 63 the IsolationForest is trained on the scenario normal captures,
 so for them this is in-sample. `dns_normal.pcap` and `frag_normal.pcap` are held out.
 
@@ -22,8 +22,8 @@ so for them this is in-sample. `dns_normal.pcap` and `frag_normal.pcap` are held
 |---|---|---|---|---|---|
 | scan.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x2, slow_scan x1 |
 | bruteforce.pcap | brute_force | yes | yes | yes | brute_force x1 |
-| dos.pcap | dos | yes | yes | no | distributed_scan x1, port_scan x2, slow_scan x1, slowloris x1, suspicious x2 |
-| decoy.pcap | port_scan | yes | yes | no | distributed_scan x1, slow_scan x6, suspicious x72 |
+| dos.pcap | dos | yes | yes | yes | distributed_scan x1, dos x4, slow_scan x1, slowloris x1 |
+| decoy.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x72, slow_scan x6 |
 | scan_syn_lo.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x1, slow_scan x1 |
 | scan_slow_router.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x3, slow_scan x1 |
 | scan_connect_router.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x3, slow_scan x1 |
@@ -38,6 +38,9 @@ so for them this is in-sample. `dns_normal.pcap` and `frag_normal.pcap` are held
 | frag_scan.pcap | fragmented_scan | no | yes | yes | fragmented_scan x1 |
 | slowloris1.pcap | slowloris | no | yes | yes | distributed_scan x1, slow_scan x1, slowloris x1 |
 | slowloris2.pcap | slowloris | no | no | no | - |
+| slowloris_test.pcap | slowloris | no | yes | yes | distributed_scan x1, slow_scan x1, slowloris x1 |
+| frag_normal.pcap | port_scan | no | yes | yes | distributed_scan x1, port_scan x2, slow_scan x1 |
+| slowloris1.pcap | slowloris | no | yes | yes | distributed_scan x1, slow_scan x1, slowloris x1 |
 | slowloris_test.pcap | slowloris | no | yes | yes | distributed_scan x1, slow_scan x1, slowloris x1 |
 
 ## Normal captures (false alerts)
@@ -54,12 +57,11 @@ so for them this is in-sample. `dns_normal.pcap` and `frag_normal.pcap` are held
 | dns_div2.pcap | 0 | - |
 | dns_div3.pcap | 0 | - |
 | dns_normal.pcap | 0 | - |
-| frag_normal.pcap | 4 | distributed_scan x1, port_scan x2, slow_scan x1 |
 
 ## Tests
 
 ```
-66 passed in 101.59s (0:01:41)
+72 passed in 108.82s (0:01:48)
 ```
 
 ## LOCO (model generalization, last lines)
