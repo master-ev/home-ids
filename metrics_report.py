@@ -193,6 +193,8 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
         if result["alerts"] > 0:
             normal_with_alerts = normal_with_alerts + 1
     lines.append("- **Normal captures with any alert**: " + str(normal_with_alerts) + "/" + str(normal_total) + " (" + str(normal_alert_count) + " alerts total)")
+    lines.append("Since day 63 the IsolationForest is trained on the scenario normal captures,")
+    lines.append("so for them this is in-sample. `dns_normal.pcap` and `frag_normal.pcap` are held out.")
     lines.append("")
     lines.append("## Attack captures")
     lines.append("")

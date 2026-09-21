@@ -180,3 +180,7 @@ def test_floods_and_slowloris_are_high():
     for attack_type in high_impact_types:
         severity = compute_severity(attack_type, SINGLE_ALERT)
         assert severity == SEVERITY_HIGH
+
+def test_single_anomaly_is_low():
+    severity = compute_severity("anomaly", SINGLE_ALERT)
+    assert severity == SEVERITY_LOW

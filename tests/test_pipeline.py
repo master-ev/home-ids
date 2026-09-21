@@ -11,6 +11,7 @@ FRAGMENT_CAPTURE = "frag_scan.pcap"
 NORMAL_CAPTURE = "normal.pcap"
 REQUIRED_MODEL_FILES = ["my_model.joblib", "my_model_v2.joblib", "normal.pcap"]
 STEALTH_SOURCE = "192.168.1.236"
+DNS_CAPTURES = ["normal_dns2.pcap", "dns_div2.pcap", "dns_div3.pcap", "dns_normal.pcap"]
 
 def require_capture(path):
     if not os.path.exists(path):
@@ -95,3 +96,11 @@ def test_replay_to_log_restores_alert_log(models_loaded, tmp_path):
     alerts = replay_to_log(STEALTH_CAPTURE, log_path)
     assert live_ids.ALERT_LOG == original_log
     assert len(alerts) >= 1
+
+@pytest.mark.parametrize("capture", DNS_CAPTURES)
+def test_dns_replay_never_labelled_brute_force(alert_log, capture):
+    require_capture(capture)
+    replay_capture(capture)
+    alerts = read_logged_alerts(alert_log)
+    brute = alerts_of_kind(alerts, "brute_force")
+    assert brute == []    

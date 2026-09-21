@@ -14,6 +14,7 @@ from context import CONTEXT_FEATURES, compute_context
 from feature_sets import clean_features
 from net_iface import active_interface, ROUTER_IP
 from trackers import detect_stealth_scans
+from scenarios import CAPTURES
 
 def require_file(path, hint):
     if not os.path.exists(path):
@@ -48,6 +49,10 @@ slowloris_alerted = set()
 conf.use_pcap = True
 WINDOW_SECONDS = 5
 ALERT_LOG = "alerts.jsonl"
+NORMAL_LABEL = "normal"
+ANOMALY_VERDICT = "anomaly"
+ANOMALY_CONTAMINATION = 0.05
+ANOMALY_RANDOM_SEED = 42
 
 classifier = None
 clf_features = None
@@ -71,19 +76,33 @@ def extract_tcp_info(packets):
         tcp_packets.append((src, dst, dport, flags))
     return tcp_packets
 
-def load_normal():
-    packets = rdpcap("normal.pcap")
-    flows = defaultdict(list)
-    for p in packets:
-        info = get_ips_ports(p)
-        if info:
-            flows[flow_key(info)].append(p)
+def normal_capture_paths():
+    paths = []
+    for capture_name, label in CAPTURES:
+        if label != NORMAL_LABEL:
+            continue
+        if not os.path.exists(capture_name):
+            print(f"[!] Normal capture missing, skipped for anomaly training: {capture_name}")
+            continue
+        paths.append(capture_name)
+    return paths
+
+def load_normal(paths):
     rows = []
-    for key, pkts in flows.items():
-        f = compute_rich_features(pkts)
-        f["destination_port"] = get_ips_ports(pkts[0])[3]
-        rows.append(f)
-    return pd.DataFrame(rows)
+    for path in paths:
+        packets = rdpcap(path)
+        flows = defaultdict(list)
+        for p in packets:
+            info = get_ips_ports(p)
+            if info:
+                flows[flow_key(info)].append(p)
+        for key, pkts in flows.items():
+            f = compute_rich_features(pkts)
+            f["destination_port"] = get_ips_ports(pkts[0])[3]
+            rows.append(f)
+    frame = pd.DataFrame(rows)
+    frame = frame.fillna(0)
+    return frame
 
 def load_models():
     global classifier, clf_features, classifier_v2, clf_features_v2
@@ -98,11 +117,16 @@ def load_models():
         classifier_v2 = saved_v2["model"]
         clf_features_v2 = saved_v2["features"]
         print(f"Using v2 model (set {saved_v2.get('feature_set', '?')}, " f"{len(clf_features_v2)} features)")
-    require_file("normal.pcap", "A normal-traffic capture. Make one with capture_run.py.")
-    normal = load_normal()
+    normal_paths = normal_capture_paths()
+    if len(normal_paths) == 0:
+        print("[!] No normal captures found for the anomaly model.")
+        print("    Check the 'normal' entries in scenarios.py.")
+        sys.exit(1)
+    normal = load_normal(normal_paths)
     anomaly_features = list(normal.columns)
-    anomaly_model = IsolationForest(contamination=0.15, random_state=42)
+    anomaly_model = IsolationForest(contamination=ANOMALY_CONTAMINATION, random_state=ANOMALY_RANDOM_SEED)
     anomaly_model.fit(normal[anomaly_features])
+    print(f"Anomaly model: {len(normal_paths)} normal captures, {len(normal)} flows, " f"contamination={ANOMALY_CONTAMINATION}")
 
 def average_confidence(values):
     if len(values) == 0:
@@ -170,6 +194,23 @@ def report_stealth_scans(packets):
         log_alert({"timestamp": timestamp, "kind": "stealth_scan", "description": desc, "source": src, "destination": dst, "num_flows": packet_count, "num_ports": port_count, "model_verdict": "stealth_scan", "confidence": None})
     return stealth_sources
 
+def choose_campaign_label(main_verdict, num_flows, num_ports):
+    if main_verdict == ANOMALY_VERDICT and num_flows >= SUSPICIOUS_MIN_FLOWS:
+        return "anomaly", f"ANOMALY ({num_flows} unusual flows, {num_ports} ports)"
+    if main_verdict == "udp_scan" and num_flows >= SUSPICIOUS_MIN_FLOWS:
+        return "udp_scan", f"UDP SCAN({num_ports} ports)"
+    if main_verdict == "syn_flood" and num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
+        return "syn_flood", f"SYN FLOOD ({num_flows} half-open)"
+    if num_ports >= SCAN_MIN_PORTS:
+        return "port_scan", f"PORT SCAN({num_ports} ports)"
+    if main_verdict == "dos" and num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
+        return "dos", f"DoS FLOOD ({num_flows} flows)"
+    if num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
+        return "brute_force", f"BRUTE FORCE ({num_flows} attempts)"
+    if num_flows >= SUSPICIOUS_MIN_FLOWS:
+        return "suspicious", f"{num_flows} suspicious flows"
+    return None, None
+
 def analyze_window(packets):
     for src, dst, count in trackers.fragment_alerts(packets):
         pair = (src, dst)
@@ -224,7 +265,7 @@ def analyze_window(packets):
             confidence = float(probabilities[best_index])
         anom_row = pd.DataFrame([{n: feats.get(n, 0) for n in anomaly_features}])[anomaly_features]
         anom_verdict = anomaly_model.predict(anom_row)[0]
-        is_attack = (clf_verdict != "normal") or (anom_verdict == -1)
+        is_attack = (clf_verdict != NORMAL_LABEL) or (anom_verdict == -1)
         src, dst, sport, dport, proto = get_ips_ports(pkts[0])
         slow = check_slow_scan(src, dst, dport)
         if slow is not None:
@@ -240,33 +281,20 @@ def analyze_window(packets):
             pair = (src, dst)
             campaigns[pair]["ports"].add(dport)
             campaigns[pair]["count"] += 1
-            reason = clf_verdict if clf_verdict != "normal" else "anomaly"
+            if clf_verdict != NORMAL_LABEL:
+                reason = clf_verdict
+            else:
+                reason = ANOMALY_VERDICT
             campaigns[pair]["verdicts"][reason] += 1
-            if clf_verdict != "normal":
+            if clf_verdict != NORMAL_LABEL:
                 campaigns[pair]["confidences"].append(confidence)
     for (src, dst), data in campaigns.items():
         num_ports = len(data["ports"])
         num_flows = data["count"]
         main_verdict = data["verdicts"].most_common(1)[0][0]
-        if main_verdict == "udp_scan" and num_flows >= SUSPICIOUS_MIN_FLOWS:
-            kind = "udp_scan"
-            desc = f"UDP SCAN({num_ports} ports)"
-        elif main_verdict == "syn_flood" and num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
-            kind = "syn_flood"
-            desc = f"SYN FLOOD ({num_flows} half-open)"
-        elif num_ports >= SCAN_MIN_PORTS:
-            kind = "port_scan"
-            desc = f"PORT SCAN({num_ports} ports)"
-        elif main_verdict == "dos" and num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
-            kind = "dos"
-            desc = f"DoS FLOOD ({num_flows} flows)"
-        elif num_flows > MIN_ATTACK_FLOWS and num_ports <= FEW_PORTS_MAX:
-            kind = "brute_force"
-            desc = f"BRUTE FORCE ({num_flows} attempts)"
-        elif num_flows >= SUSPICIOUS_MIN_FLOWS:
-            kind = "suspicious"
-            desc = f"{num_flows} suspicious flows"
-        else:
+
+        kind, desc = choose_campaign_label(main_verdict, num_flows, num_ports)
+        if kind is None:
             continue
         is_udp_scan = kind == "udp_scan"
         is_stealth_source = src in stealth_sources
