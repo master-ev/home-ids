@@ -139,6 +139,15 @@ def check_dest_scan(dst, dport):
         return distinct_ports
     return None
 
+def reset_live_state():
+    frag_alerted.clear()
+    port_history.clear()
+    slow_scan_alerted.clear()
+    dest_history.clear()
+    dest_scan_alerted.clear()
+    slowloris_windows.clear()
+    slowloris_alerted.clear()
+
 def report_stealth_scans(packets):
     stealth_input = extract_tcp_info(packets)
     stealth_alerts = detect_stealth_scans(stealth_input)
