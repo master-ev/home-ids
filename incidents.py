@@ -24,6 +24,9 @@ ATTACK_MARKERS = [BRUTE_MARKER, DOS_MARKER]
 FRAGMENT_MARKER = "fragment"
 STEALTH_MARKER = "stealth"
 EVASION_MARKERS = [FRAGMENT_MARKER, STEALTH_MARKER]
+FLOOD_MARKER = "flood"
+SLOWLORIS_MARKER = "slowloris"
+HIGH_IMPACT_MARKERS = [DOS_MARKER, FLOOD_MARKER, SLOWLORIS_MARKER]
 PATTERN_SINGLE = "single"
 PATTERN_MULTI_SOURCE = "multi-source"
 PATTERN_MULTI_STAGE = "multi-stage"
@@ -195,6 +198,12 @@ def load_alerts(path):
         print(f"[!] Skipped {skipped} invalid lines")
     return alerts
 
+def is_high_impact(attack_type):
+    for marker in HIGH_IMPACT_MARKERS:
+        if marker in attack_type:
+            return True
+    return False
+
 def is_evasion(attack_type):
     for marker in EVASION_MARKERS:
         if marker in attack_type:
@@ -202,9 +211,7 @@ def is_evasion(attack_type):
     return False
 
 def compute_severity(attack_type, alert_count):
-    if DOS_MARKER in attack_type:
-        return SEVERITY_HIGH
-    if "flood" in attack_type or "slowloris" in attack_type or DOS_MARKER in attack_type:
+    if is_high_impact(attack_type):
         return SEVERITY_HIGH
     if is_evasion(attack_type):
         return SEVERITY_MEDIUM

@@ -1,4 +1,5 @@
 import incidents as inc
+from incidents import SEVERITY_HIGH
 BASE_TIME = 1000000.0
 ROUTER = "192.168.1.1"
 SERVER = "192.168.1.20"
@@ -173,3 +174,9 @@ def test_plain_scan_below_threshold_stays_low():
     below_threshold = SCAN_MEDIUM_MIN_ALERTS - 1
     severity = compute_severity("port_scan", below_threshold)
     assert severity == SEVERITY_LOW
+
+def test_floods_and_slowloris_are_high():
+    high_impact_types = ["syn_flood", "icmp_flood", "slowloris", "dos"]
+    for attack_type in high_impact_types:
+        severity = compute_severity(attack_type, SINGLE_ALERT)
+        assert severity == SEVERITY_HIGH
