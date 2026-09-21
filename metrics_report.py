@@ -13,8 +13,26 @@ TEMP_LOG_NAME = "metrics_alerts.jsonl"
 NORMAL_LABEL = "normal"
 TAIL_LINES = 15
 PYTEST_TAIL_LINES = 1
-LABEL_TO_KIND = {"port_scan": "port_scan", "scan": "port_scan", "udp_scan": "udp_scan", "dos": "dos", "brute_force": "brute_force", "bruteforce": "brute_force", "syn_flood": "syn_flood",}
-EXTRA_CASES = [("stealth_sX.pcap", "stealth_scan"), ("stealth_sN.pcap", "stealth_scan"), ("stealth_sF.pcap", "stealth_scan"), ("frag_scan.pcap", "fragmented_scan"), ("frag_normal.pcap", "port_scan"), ("slowloris1.pcap", "slowloris"), ("slowloris_test.pcap", "slowloris"),]
+
+LABEL_TO_KIND = {
+    "port_scan": "port_scan",
+    "scan": "port_scan",
+    "udp_scan": "udp_scan",
+    "dos": "dos",
+    "brute_force": "brute_force",
+    "bruteforce": "brute_force",
+    "syn_flood": "syn_flood",
+}
+
+EXTRA_CASES = [
+    ("stealth_sX.pcap", "stealth_scan"),
+    ("stealth_sN.pcap", "stealth_scan"),
+    ("stealth_sF.pcap", "stealth_scan"),
+    ("frag_scan.pcap", "fragmented_scan"),
+    ("frag_normal.pcap", "port_scan"),
+    ("slowloris1.pcap", "slowloris"),
+    ("slowloris_test.pcap", "slowloris"),
+]
 EXTRA_NORMAL_CASES = ["dns_normal.pcap"]
 
 def build_cases():
@@ -47,16 +65,20 @@ def build_cases():
         normal_cases.append(capture_name)
     return attack_cases, normal_cases
 
-def git_has_uncommitted_changes():
-    lines = run_command_tail(["git", "status", "--porcelain"], 1)
-    return len(lines) > 0
-
 def count_kinds(alerts):
     kind_counts = Counter()
     for alert in alerts:
         kind = alert["kind"]
         kind_counts[kind] = kind_counts[kind] + 1
     return kind_counts
+
+def count_notified(alerts):
+    notified = 0
+    for alert in alerts:
+        is_notified = alert.get("notified", True)
+        if is_notified:
+            notified = notified + 1
+    return notified
 
 def evaluate_attack(case, log_path):
     result = {
@@ -68,12 +90,16 @@ def evaluate_attack(case, log_path):
         "detected": False,
         "correct": False,
         "kinds": Counter(),
+        "logged": 0,
+        "notified": 0,
     }
     if not os.path.exists(case["path"]):
         result["status"] = "missing"
         return result
     alerts = replay_to_log(case["path"], log_path)
     result["kinds"] = count_kinds(alerts)
+    result["logged"] = len(alerts)
+    result["notified"] = count_notified(alerts)
     total_alerts = len(alerts)
     if total_alerts > 0:
         result["detected"] = True
@@ -84,12 +110,13 @@ def evaluate_attack(case, log_path):
     return result
 
 def evaluate_normal(capture_path, log_path):
-    result = {"path": capture_path, "status": "ok", "alerts": 0, "kinds": Counter()}
+    result = {"path": capture_path, "status": "ok", "alerts": 0, "notified": 0, "kinds": Counter()}
     if not os.path.exists(capture_path):
         result["status"] = "missing"
         return result
     alerts = replay_to_log(capture_path, log_path)
     result["alerts"] = len(alerts)
+    result["notified"] = count_notified(alerts)
     result["kinds"] = count_kinds(alerts)
     return result
 
@@ -109,6 +136,15 @@ def summarize_attacks(results, in_training):
                 summary["correct"] = summary["correct"] + 1
     return summary
 
+def summarize_noise(results):
+    totals = {"logged": 0, "notified": 0}
+    for result in results:
+        if result["status"] != "ok":
+            continue
+        totals["logged"] = totals["logged"] + result["logged"]
+        totals["notified"] = totals["notified"] + result["notified"]
+    return totals
+
 def run_command_tail(command, line_count):
     completed = subprocess.run(command, capture_output=True, text=True)
     output = completed.stdout + completed.stderr
@@ -127,6 +163,10 @@ def git_commit_hash():
     if len(lines) == 0:
         return "unknown"
     return lines[0]
+
+def git_has_uncommitted_changes():
+    lines = run_command_tail(["git", "status", "--porcelain"], 1)
+    return len(lines) > 0
 
 def yes_no(flag):
     if flag:
@@ -148,19 +188,24 @@ def attack_row(result):
     if expected_text is None:
         expected_text = "?"
     if result["status"] == "missing":
-        return "| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | missing | missing | - |"
+        return "| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | missing | missing | - | - | - |"
     detected_text = yes_no(result["detected"])
     if result["expected"] is None:
         correct_text = "?"
     else:
         correct_text = yes_no(result["correct"])
+    logged_text = str(result["logged"])
+    notified_text = str(result["notified"])
     kinds_text = format_kinds(result["kinds"])
-    return "| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | " + detected_text + " | " + correct_text + " | " + kinds_text + " |"
+    return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | " + detected_text + " | " + correct_text + " | " + logged_text + " | " + notified_text + " | " + kinds_text + " |")
 
 def normal_row(result):
     if result["status"] == "missing":
-        return "| " + result["path"] + " | missing | - |"
-    return "| " + result["path"] + " | " + str(result["alerts"]) + " | " + format_kinds(result["kinds"]) + " |"
+        return "| " + result["path"] + " | missing | - | - |"
+    alerts_text = str(result["alerts"])
+    notified_text = str(result["notified"])
+    kinds_text = format_kinds(result["kinds"])
+    return "| " + result["path"] + " | " + alerts_text + " | " + notified_text + " | " + kinds_text + " |"
 
 def summary_line(title, summary):
     return ("- **" + title + "**: detected " + str(summary["detected"]) + "/" + str(summary["total"]) + ", correctly labelled " + str(summary["correct"]) + "/" + str(summary["checkable"]))
@@ -168,11 +213,11 @@ def summary_line(title, summary):
 def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines = []
     now_text = datetime.now().strftime("%Y-%m-%d %H:%M")
-    lines.append("# Home IDS - Metrics")
-    lines.append("")
     commit_text = "`" + git_commit_hash() + "`"
     if git_has_uncommitted_changes():
         commit_text = commit_text + " (+ uncommitted changes)"
+    lines.append("# Home IDS - Metrics")
+    lines.append("")
     lines.append("Generated " + now_text + " at commit " + commit_text + " by `metrics_report.py`.")
     lines.append("")
     lines.append("> **How to read this.** Each capture is replayed through the live pipeline")
@@ -180,13 +225,17 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("> *Detected* = at least one alert. *Correctly labelled* = an alert of the expected kind.")
     lines.append("> Captures marked *in training* were seen by the model, so for them this measures")
     lines.append("> the pipeline, not generalization. Model generalization = LOCO (below).")
+    lines.append("> *Logged* = alerts written to the log (evidence, used by incidents.py).")
+    lines.append("> *Notified* = alerts shown to the human (one per source/destination/kind per cooldown).")
     lines.append("")
     unseen = summarize_attacks(attack_results, False)
     seen = summarize_attacks(attack_results, True)
+    noise = summarize_noise(attack_results)
     lines.append("## Summary")
     lines.append("")
     lines.append(summary_line("Unseen attack captures", unseen))
     lines.append(summary_line("In-training attack captures", seen))
+    lines.append("- **Attack alerts**: " + str(noise["logged"]) + " logged, " + str(noise["notified"]) + " notified (cooldown " + str(live_ids.ALERT_COOLDOWN_SECONDS) + " s per source/destination/kind)")
     normal_total = 0
     normal_with_alerts = 0
     normal_alert_count = 0
@@ -198,20 +247,21 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
         if result["alerts"] > 0:
             normal_with_alerts = normal_with_alerts + 1
     lines.append("- **Normal captures with any alert**: " + str(normal_with_alerts) + "/" + str(normal_total) + " (" + str(normal_alert_count) + " alerts total)")
-    lines.append("Since day 63 the IsolationForest is trained on the scenario normal captures,")
-    lines.append("so for them this is in-sample. `dns_normal.pcap` and `frag_normal.pcap` are held out.")
     lines.append("")
     lines.append("## Attack captures")
     lines.append("")
-    lines.append("| Capture | Expected | In training | Detected | Correct label | Alert kinds |")
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("| Capture | Expected | In training | Detected | Correct label | Logged | Notified | Alert kinds |")
+    lines.append("|---|---|---|---|---|---|---|---|")
     for result in attack_results:
         lines.append(attack_row(result))
     lines.append("")
     lines.append("## Normal captures (false alerts)")
     lines.append("")
-    lines.append("| Capture | Alerts | Alert kinds |")
-    lines.append("|---|---|---|")
+    lines.append("Since day 63 the IsolationForest is trained on the scenario normal captures,")
+    lines.append("so for them this is in-sample. `dns_normal.pcap` is held out.")
+    lines.append("")
+    lines.append("| Capture | Alerts | Notified | Alert kinds |")
+    lines.append("|---|---|---|---|")
     for result in normal_results:
         lines.append(normal_row(result))
     lines.append("")
