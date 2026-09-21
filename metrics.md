@@ -1,0 +1,82 @@
+# Home IDS - Metrics
+
+Generated 2026-09-21 20:17 at commit `8a608ae` (+ uncommitted changes) by `metrics_report.py`.
+
+> **How to read this.** Each capture is replayed through the live pipeline
+> (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
+> *Detected* = at least one alert. *Correctly labelled* = an alert of the expected kind.
+> Captures marked *in training* were seen by the model, so for them this measures
+> the pipeline, not generalization. Model generalization = LOCO (below).
+
+## Summary
+
+- **Unseen attack captures**: detected 6/7, correctly labelled 6/7
+- **In-training attack captures**: detected 12/12, correctly labelled 10/12
+- **Normal captures with any alert**: 4/11 (12 alerts total)
+
+## Attack captures
+
+| Capture | Expected | In training | Detected | Correct label | Alert kinds |
+|---|---|---|---|---|---|
+| scan.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x2, slow_scan x1 |
+| bruteforce.pcap | brute_force | yes | yes | yes | brute_force x1 |
+| dos.pcap | dos | yes | yes | no | distributed_scan x1, port_scan x2, slow_scan x1, slowloris x1, suspicious x2 |
+| decoy.pcap | port_scan | yes | yes | no | distributed_scan x1, slow_scan x6, suspicious x72 |
+| scan_syn_lo.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x1, slow_scan x1 |
+| scan_slow_router.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x3, slow_scan x1 |
+| scan_connect_router.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x3, slow_scan x1 |
+| decoy2_router.pcap | port_scan | yes | yes | yes | distributed_scan x1, port_scan x12, slow_scan x3 |
+| udp_scan1.pcap | udp_scan | yes | yes | yes | distributed_scan x1, slow_scan x1, udp_scan x11 |
+| udp_scan2.pcap | udp_scan | yes | yes | yes | distributed_scan x1, slow_scan x1, udp_scan x11 |
+| syn_flood1.pcap | syn_flood | yes | yes | yes | slowloris x1, syn_flood x4 |
+| syn_flood2.pcap | syn_flood | yes | yes | yes | slowloris x1, syn_flood x4 |
+| stealth_sX.pcap | stealth_scan | no | yes | yes | distributed_scan x1, slow_scan x1, stealth_scan x2 |
+| stealth_sN.pcap | stealth_scan | no | yes | yes | distributed_scan x1, slow_scan x1, stealth_scan x2 |
+| stealth_sF.pcap | stealth_scan | no | yes | yes | distributed_scan x1, slow_scan x1, stealth_scan x2 |
+| frag_scan.pcap | fragmented_scan | no | yes | yes | fragmented_scan x1 |
+| slowloris1.pcap | slowloris | no | yes | yes | distributed_scan x1, slow_scan x1, slowloris x1 |
+| slowloris2.pcap | slowloris | no | no | no | - |
+| slowloris_test.pcap | slowloris | no | yes | yes | distributed_scan x1, slow_scan x1, slowloris x1 |
+
+## Normal captures (false alerts)
+
+| Capture | Alerts | Alert kinds |
+|---|---|---|
+| normal.pcap | 0 | - |
+| normal_web.pcap | 0 | - |
+| normal_stream.pcap | 0 | - |
+| normal_mixed.pcap | 0 | - |
+| normal_dns1.pcap | 0 | - |
+| normal_dns2.pcap | 2 | brute_force x2 |
+| dns_div1.pcap | 0 | - |
+| dns_div2.pcap | 5 | brute_force x3, suspicious x2 |
+| dns_div3.pcap | 1 | brute_force x1 |
+| dns_normal.pcap | 0 | - |
+| frag_normal.pcap | 4 | distributed_scan x1, port_scan x2, slow_scan x1 |
+
+## Tests
+
+```
+57 passed in 81.91s (0:01:21)
+```
+
+## LOCO (model generalization, last lines)
+
+```
+normal_mixed.pcap       normal         100.0   100.0   100.0   100.0
+normal_stream.pcap      normal         100.0   100.0   100.0   100.0
+normal_web.pcap         normal         100.0   100.0   100.0   100.0
+scan.pcap               scan           100.0   100.0   100.0    99.9
+scan_connect_router.pcapscan           100.0   100.0   100.0   100.0
+scan_slow_router.pcap   scan           100.0   100.0   100.0   100.0
+scan_syn_lo.pcap        scan            99.4    99.4    99.4    99.4
+syn_flood1.pcap         syn_flood        0.5   100.0   100.0   100.0
+syn_flood2.pcap         syn_flood      100.0   100.0   100.0   100.0
+udp_scan1.pcap          udp_scan        95.6    95.6    95.6    95.6
+udp_scan2.pcap          udp_scan        99.4    99.4    99.4    99.4
+mean                                    93.8    99.1    99.0    99.1
+worst                                    0.5    88.6    88.6    88.6
+Results below 80%: what did the model say?
+set A  syn_flood1.pcap          true=syn_flood   predicted={'udp_scan': 210, 'syn_flood': 1}
+```
+
