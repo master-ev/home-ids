@@ -4,7 +4,7 @@ import json
 import trackers
 import os
 import sys
-from scapy.all import sniff, conf, IP
+from scapy.all import sniff, conf, IP, rdpcap
 from collections import Counter, defaultdict
 from datetime import datetime
 import time
@@ -21,13 +21,13 @@ def require_file(path, hint):
         print("    Run 'venv/bin/python setup_check.py' for the full checklist.")
         sys.exit(1)
 
-FRAGMENT_FLOOD_THRESHOLD = 30 
+FRAGMENT_FLOOD_THRESHOLD = 30
 frag_alerted = set()
 MODEL_ALERT_MIN_CONFIDENCE = 0.70
 USE_V2 = True
 V2_MODEL_PATH = "my_model_v2.joblib"
 port_history = defaultdict(list)
-SLOW_SCAN_WINDOW = 300 # seconds
+SLOW_SCAN_WINDOW = 300
 SLOW_SCAN_THRESHOLD = 15
 slow_scan_alerted = set()
 dest_history = defaultdict(list)
@@ -44,26 +44,31 @@ SLOWLORIS_MAX_PKTS_PER_CONN = 12
 SLOWLORIS_MIN_WINDOWS = 3
 slowloris_windows = defaultdict(int)
 slowloris_alerted = set()
-
 conf.use_pcap = True
-INTERFACE = active_interface(ROUTER_IP)
-print(f"Auto-detected interface: {INTERFACE}")
 WINDOW_SECONDS = 5
 ALERT_LOG = "alerts.jsonl"
-require_file("my_model.joblib", "The base model. Build it with build_my_dataset.py + train_mine.py.")
-saved = joblib.load("my_model.joblib")
-if USE_V2:
-    require_file(V2_MODEL_PATH, "The v2 model. Build it with build_dataset_v2.py + train_v2.py D.")
-    saved_v2 = joblib.load(V2_MODEL_PATH)
-    classifier_v2 = saved_v2["model"]
-    clf_features_v2 = saved_v2["features"]
-    print(f"Using v2 model (set {saved_v2.get('feature_set', '?')}, " f"{len(clf_features_v2)} features)")
+
 classifier = None
 clf_features = None
 classifier_v2 = None
 clf_features_v2 = None
 anomaly_model = None
 anomaly_features = None
+INTERFACE = None
+
+def load_normal():
+    packets = rdpcap("normal.pcap")
+    flows = defaultdict(list)
+    for p in packets:
+        info = get_ips_ports(p)
+        if info:
+            flows[flow_key(info)].append(p)
+    rows = []
+    for key, pkts in flows.items():
+        f = compute_rich_features(pkts)
+        f["destination_port"] = get_ips_ports(pkts[0])[3]
+        rows.append(f)
+    return pd.DataFrame(rows)
 
 def load_models():
     global classifier, clf_features, classifier_v2, clf_features_v2
@@ -81,9 +86,8 @@ def load_models():
     require_file("normal.pcap", "A normal-traffic capture. Make one with capture_run.py.")
     normal = load_normal()
     anomaly_features = list(normal.columns)
-    anomaly_model_local = IsolationForest(contamination=0.15, random_state=42)
-    anomaly_model_local.fit(normal[anomaly_features])
-    anomaly_model = anomaly_model_local
+    anomaly_model = IsolationForest(contamination=0.15, random_state=42)
+    anomaly_model.fit(normal[anomaly_features])
 
 def average_confidence(values):
     if len(values) == 0:
@@ -98,28 +102,6 @@ def average_confidence(values):
 def log_alert(alert):
     with open(ALERT_LOG, "a") as f:
         f.write(json.dumps(alert) + "\n")
-
-from scapy.all import rdpcap
-def load_normal():
-    packets = rdpcap("normal.pcap")
-    flows = defaultdict(list)
-    for p in packets:
-        info = get_ips_ports(p)
-        if info: flows[flow_key(info)].append(p)
-    rows = []
-    for key, pkts in flows.items():
-        f = compute_rich_features(pkts)
-        f["destination_port"] = get_ips_ports(pkts[0])[3]
-        rows.append(f)
-    return pd.DataFrame(rows)
-
-require_file("normal.pcap", "A normal-traffic capture. Make one with capture_run.py.")
-normal = load_normal()
-anomaly_features = list(normal.columns)
-anomaly_model = IsolationForest(contamination=0.15, random_state=42)
-anomaly_model.fit(normal[anomaly_features])
-
-print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
 
 def check_slow_scan(src, dst, dport):
     now = time.time()
@@ -250,7 +232,8 @@ def analyze_window(packets):
         log_alert({"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence})
     for triple, count in trackers.slowloris_candidates(flow_list):
         slowloris_windows[triple] = slowloris_windows[triple] + 1
-        if (slowloris_windows[triple] >= trackers.SLOWLORIS_MIN_WINDOWS and triple not in slowloris_alerted):
+        if (slowloris_windows[triple] >= trackers.SLOWLORIS_MIN_WINDOWS
+                and triple not in slowloris_alerted):
             slowloris_alerted.add(triple)
             host_a, host_b, port = triple
             now_str = datetime.now().strftime("%H:%M:%S")
@@ -260,6 +243,9 @@ def analyze_window(packets):
             log_alert({"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None})
 
 def run_live():
+    global INTERFACE
+    INTERFACE = active_interface(ROUTER_IP)
+    print(f"Auto-detected interface: {INTERFACE}")
     load_models()
     print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows\n")
     try:
