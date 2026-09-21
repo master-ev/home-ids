@@ -2,9 +2,14 @@ import os
 from collections import defaultdict
 import pytest
 from scapy.all import rdpcap
+from live_ids import extract_tcp_info
+from trackers import detect_stealth_scans
 MODEL = "my_model_v2.joblib"
 SCAN_CAPTURE = "scan.pcap"
 FRAG_CAPTURE = "frag_scan.pcap"
+
+STEALTH_CAPTURES = ["stealth_sX.pcap", "stealth_sN.pcap", "stealth_sF.pcap"]
+EXPECTED_TYPES = {"stealth_sX.pcap": "XMAS", "stealth_sN.pcap": "NULL", "stealth_sF.pcap": "FIN",}
 
 pytestmark = pytest.mark.skipif(
     not os.path.exists(MODEL),
@@ -47,3 +52,15 @@ def test_scan_capture_raises_scan_alert():
 def test_fragmented_scan_is_detected():
     alerts = run_capture(FRAG_CAPTURE)
     assert "fragmented_scan" in kinds(alerts)
+
+@pytest.mark.parametrize("capture", STEALTH_CAPTURES)
+def test_stealth_capture_detected(capture):
+    if not os.path.exists(capture):
+        pytest.skip("capture not available: " + capture)
+    packets = rdpcap(capture)
+    tcp_packets = extract_tcp_info(packets)
+    alerts = detect_stealth_scans(tcp_packets)
+    assert len(alerts) >= 1
+    expected = EXPECTED_TYPES[capture]
+    found_types = alerts[0]["scan_types"]
+    assert expected in found_types

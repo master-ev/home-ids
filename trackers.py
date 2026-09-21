@@ -94,3 +94,55 @@ def slowloris_candidates(flow_list):
         if count >= SLOWLORIS_MIN_CONNECTIONS:
             candidates.append((triple, count))
     return candidates
+
+TCP_FIN = 0x01
+TCP_SYN = 0x02
+TCP_RST = 0x04
+TCP_PSH = 0x08
+TCP_ACK = 0x10
+TCP_URG = 0x20
+TCP_BASE_FLAGS_MASK = TCP_FIN | TCP_SYN | TCP_RST | TCP_PSH | TCP_ACK | TCP_URG
+FLAGS_NULL = 0
+FLAGS_FIN_ONLY = TCP_FIN
+FLAGS_XMAS = TCP_FIN | TCP_PSH | TCP_URG
+FLAGS_SYN_FIN = TCP_SYN | TCP_FIN
+STEALTH_MIN_PACKETS = 5
+STEALTH_MIN_PORTS = 3
+
+def classify_stealth_flags(flags):
+    base_flags = flags & TCP_BASE_FLAGS_MASK
+    if base_flags == FLAGS_NULL:
+        return "NULL"
+    if base_flags == FLAGS_FIN_ONLY:
+        return "FIN"
+    if base_flags == FLAGS_XMAS:
+        return "XMAS"
+    syn_fin_bits = base_flags & FLAGS_SYN_FIN
+    if syn_fin_bits == FLAGS_SYN_FIN:
+        return "SYN-FIN"
+    return None
+
+def detect_stealth_scans(tcp_packets):
+    per_source = {}
+    for packet in tcp_packets:
+        src, dst, dport, flags = packet
+        scan_type = classify_stealth_flags(flags)
+        if scan_type is None:
+            continue
+        if src not in per_source:
+            per_source[src] = {"count": 0, "ports": set(), "dsts": set(), "types": set()}
+        stats = per_source[src]
+        stats["count"] = stats["count"] + 1
+        stats["ports"].add(dport)
+        stats["dsts"].add(dst)
+        stats["types"].add(scan_type)
+    alerts = []
+    for src in sorted(per_source):
+        stats = per_source[src]
+        port_count = len(stats["ports"])
+        enough_packets = stats["count"] >= STEALTH_MIN_PACKETS
+        enough_ports = port_count >= STEALTH_MIN_PORTS
+        if enough_packets and enough_ports:
+            alert = {"src": src, "attack": "STEALTH SCAN", "scan_types": sorted(stats["types"]), "packets": stats["count"], "ports": port_count, "dsts": sorted(stats["dsts"]),}
+            alerts.append(alert)
+    return alerts

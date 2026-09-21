@@ -157,3 +157,19 @@ def test_low_confidence_flag():
     assert inc.is_low_confidence(CONF_LOW) is True
     assert inc.is_low_confidence(CONF_HIGH) is False
     assert inc.is_low_confidence(None) is False
+
+from incidents import compute_severity, SEVERITY_MEDIUM, SEVERITY_LOW, SCAN_MEDIUM_MIN_ALERTS
+SINGLE_ALERT = 1
+
+def test_single_stealth_scan_is_medium():
+    severity = compute_severity("stealth_scan", SINGLE_ALERT)
+    assert severity == SEVERITY_MEDIUM
+
+def test_single_fragmented_scan_is_medium():
+    severity = compute_severity("fragmented_scan", SINGLE_ALERT)
+    assert severity == SEVERITY_MEDIUM
+
+def test_plain_scan_below_threshold_stays_low():
+    below_threshold = SCAN_MEDIUM_MIN_ALERTS - 1
+    severity = compute_severity("port_scan", below_threshold)
+    assert severity == SEVERITY_LOW

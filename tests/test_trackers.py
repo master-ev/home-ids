@@ -93,3 +93,72 @@ def test_slowloris_below_min_connections_silent():
         flow_list.append([make_tcp(ATTACKER, TARGET, CLIENT_PORT + index, SERVER_PORT)])
         index = index + 1
     assert len(trackers.slowloris_candidates(flow_list)) == 0
+
+from trackers import(classify_stealth_flags, detect_stealth_scans, TCP_FIN, TCP_SYN, TCP_RST, TCP_PSH, TCP_ACK, TCP_URG, STEALTH_MIN_PACKETS, STEALTH_MIN_PORTS,)
+TCP_ECE = 0x40
+TCP_CWR = 0x80
+ATTACKER = "10.0.0.66"
+VICTIM = "10.0.0.5"
+FIRST_PORT = 20
+
+def test_stealth_flag_types():
+    assert classify_stealth_flags(0) == "NULL"
+    assert classify_stealth_flags(TCP_FIN) == "FIN"
+    assert classify_stealth_flags(TCP_FIN | TCP_PSH | TCP_URG) == "XMAS"
+    assert classify_stealth_flags(TCP_SYN | TCP_FIN) == "SYN-FIN"
+
+def test_normal_flags_are_not_stealth():
+    normal_flag_values = [TCP_SYN, TCP_SYN | TCP_ACK, TCP_ACK, TCP_PSH | TCP_ACK, TCP_FIN | TCP_ACK, TCP_RST, TCP_RST | TCP_ACK,]
+    for flags in normal_flag_values:
+        assert classify_stealth_flags(flags) is None
+
+def test_syn_with_ecn_is_not_stealth():
+    syn_with_ecn = TCP_SYN | TCP_ECE | TCP_CWR
+    assert classify_stealth_flags(syn_with_ecn) is None
+
+def build_scan(flags, packet_count):
+    packets = []
+    for i in range(packet_count):
+        port = FIRST_PORT + i
+        packets.append((ATTACKER, VICTIM, port, flags))
+    return packets
+
+def test_xmas_scan_detected():
+    xmas_flags = TCP_FIN | TCP_PSH | TCP_URG
+    packets = build_scan(xmas_flags, STEALTH_MIN_PACKETS)
+    alerts = detect_stealth_scans(packets)
+    assert len(alerts) == 1
+    assert alerts[0]["src"] == ATTACKER
+    assert alerts[0]["scan_types"] == ["XMAS"]
+
+def test_below_threshold_not_detected():
+    too_few = STEALTH_MIN_PACKETS - 1
+    packets = build_scan(0, too_few)
+    alerts = detect_stealth_scans(packets)
+    assert alerts == []
+
+def test_same_port_repeated_not_detected():
+    packets = []
+    repeat_count = STEALTH_MIN_PACKETS * 2
+    for i in range(repeat_count):
+        packets.append((ATTACKER, VICTIM, FIRST_PORT, TCP_FIN))
+    alerts = detect_stealth_scans(packets)
+    assert alerts == []
+
+def test_normal_teardown_traffic_not_detected():
+    fin_ack = TCP_FIN | TCP_ACK
+    packet_count = STEALTH_MIN_PACKETS * 10
+    packets = build_scan(fin_ack, packet_count)
+    alerts = detect_stealth_scans(packets)
+    assert alerts == []
+
+def test_sources_counted_separately():
+    other_attacker = "10.0.0.77"
+    packets = build_scan(0, STEALTH_MIN_PACKETS)
+    few_packets = STEALTH_MIN_PORTS - 1
+    for i in range(few_packets):
+        port = FIRST_PORT + i
+        packets.append((other_attacker, VICTIM, port, 0))
+    alerts = detect_stealth_scans(packets)
+    assert len(alerts) == 1
+    assert alerts[0]["src"] == ATTACKER

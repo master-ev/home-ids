@@ -4,7 +4,7 @@ import json
 import trackers
 import os
 import sys
-from scapy.all import sniff, conf, IP, rdpcap
+from scapy.all import sniff, conf, IP, rdpcap, TCP
 from collections import Counter, defaultdict
 from datetime import datetime
 import time
@@ -13,6 +13,7 @@ from features import get_ips_ports, flow_key, compute_rich_features
 from context import CONTEXT_FEATURES, compute_context
 from feature_sets import clean_features
 from net_iface import active_interface, ROUTER_IP
+from trackers import detect_stealth_scans
 
 def require_file(path, hint):
     if not os.path.exists(path):
@@ -55,6 +56,20 @@ clf_features_v2 = None
 anomaly_model = None
 anomaly_features = None
 INTERFACE = None
+
+def extract_tcp_info(packets):
+    tcp_packets = []
+    for pkt in packets:
+        has_ip = IP in pkt
+        has_tcp = TCP in pkt
+        if not (has_ip and has_tcp):
+            continue
+        src = pkt[IP].src
+        dst = pkt[IP].dst
+        dport = pkt[TCP].dport
+        flags = int(pkt[TCP].flags)
+        tcp_packets.append((src, dst, dport, flags))
+    return tcp_packets
 
 def load_normal():
     packets = rdpcap("normal.pcap")
@@ -124,6 +139,28 @@ def check_dest_scan(dst, dport):
         return distinct_ports
     return None
 
+def report_stealth_scans(packets):
+    stealth_input = extract_tcp_info(packets)
+    stealth_alerts = detect_stealth_scans(stealth_input)
+    stealth_sources = set()
+    for stealth in stealth_alerts:
+        src = stealth["src"]
+        stealth_sources.add(src)
+        dst_list = stealth["dsts"]
+        if len(dst_list) == 1:
+            dst = dst_list[0]
+        else:
+            dst = "multiple"
+        types_text = ",".join(stealth["scan_types"])
+        packet_count = stealth["packets"]
+        port_count = stealth["ports"]
+        desc = f"STEALTH SCAN ({types_text}, {packet_count} packets, {port_count} ports)"
+        now_str = datetime.now().strftime("%H:%M:%S")
+        timestamp = datetime.now().isoformat()
+        print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
+        log_alert({"timestamp": timestamp, "kind": "stealth_scan", "description": desc, "source": src, "destination": dst, "num_flows": packet_count, "num_ports": port_count, "model_verdict": "stealth_scan", "confidence": None})
+    return stealth_sources
+
 def analyze_window(packets):
     for src, dst, count in trackers.fragment_alerts(packets):
         pair = (src, dst)
@@ -140,6 +177,7 @@ def analyze_window(packets):
         desc = f"ICMP FLOOD ({count} packets)"
         print(f"[{now_str}] ALERT: {desc} {src} -> {dst}")
         log_alert({"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None})
+    stealth_sources = report_stealth_scans(packets)
     flows = defaultdict(list)
     for p in packets:
         info = get_ips_ports(p)
@@ -220,6 +258,10 @@ def analyze_window(packets):
             kind = "suspicious"
             desc = f"{num_flows} suspicious flows"
         else:
+            continue
+        is_udp_scan = kind == "udp_scan"
+        is_stealth_source = src in stealth_sources
+        if is_udp_scan and is_stealth_source:
             continue
         confidence = average_confidence(data["confidences"])
         if confidence is not None and confidence < MODEL_ALERT_MIN_CONFIDENCE:
