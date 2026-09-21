@@ -226,7 +226,7 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("> Captures marked *in training* were seen by the model, so for them this measures")
     lines.append("> the pipeline, not generalization. Model generalization = LOCO (below).")
     lines.append("> *Logged* = alerts written to the log (evidence, used by incidents.py).")
-    lines.append("> *Notified* = alerts shown to the human (one per source/destination/kind per cooldown).")
+    lines.append("> *Notified* = alerts shown to the human (one per source/destination/family per cooldown).")
     lines.append("")
     unseen = summarize_attacks(attack_results, False)
     seen = summarize_attacks(attack_results, True)
@@ -235,7 +235,7 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("")
     lines.append(summary_line("Unseen attack captures", unseen))
     lines.append(summary_line("In-training attack captures", seen))
-    lines.append("- **Attack alerts**: " + str(noise["logged"]) + " logged, " + str(noise["notified"]) + " notified (cooldown " + str(live_ids.ALERT_COOLDOWN_SECONDS) + " s per source/destination/kind)")
+    lines.append("- **Attack alerts**: " + str(noise["logged"]) + " logged, " + str(noise["notified"]) + " notified (cooldown " + str(live_ids.ALERT_COOLDOWN_SECONDS) + " s per source/destination/family)")
     normal_total = 0
     normal_with_alerts = 0
     normal_alert_count = 0

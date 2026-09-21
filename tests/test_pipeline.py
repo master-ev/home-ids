@@ -16,6 +16,45 @@ DECOY_CAPTURE = "decoy.pcap"
 SLOWLORIS_CAPTURE = "slowloris1.pcap"
 CONNECT_SCAN_CAPTURE = "scan_connect_router.pcap"
 
+from live_ids import family_of, families_that_block
+
+
+def notified_family_keys(alerts):
+    keys = set()
+    for alert in alerts:
+        if alert.get("notified", True):
+            keys.add((alert["source"], alert["destination"], family_of(alert["kind"])))
+    return keys
+
+
+def is_covered(alert, notified_keys):
+    """An alert is covered if its pair got a notice of its family or of a covering family."""
+    family = family_of(alert["kind"])
+    for candidate_family in families_that_block(family):
+        candidate_key = (alert["source"], alert["destination"], candidate_family)
+        if candidate_key in notified_keys:
+            return True
+    return False
+
+
+def test_decoy_replay_every_alert_covered_by_a_notice(alert_log):
+    # Day 66 safety property, at family level since day 68: no (source, destination)
+    # with logged alerts may be silenced completely - every decoy source is shown.
+    require_capture(DECOY_CAPTURE)
+    replay_capture(DECOY_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    notified_keys = notified_family_keys(alerts)
+    uncovered = []
+    for alert in alerts:
+        if not is_covered(alert, notified_keys):
+            uncovered.append(alert)
+    notified_count = 0
+    for alert in alerts:
+        if alert["notified"]:
+            notified_count = notified_count + 1
+    assert uncovered == []
+    assert notified_count < len(alerts)
+
 def require_capture(path):
     if not os.path.exists(path):
         pytest.skip("capture not available: " + path)
@@ -138,27 +177,6 @@ def test_stealth_replay_still_raises_slow_scan(alert_log):
     replay_capture(STEALTH_CAPTURE)
     alerts = read_logged_alerts(alert_log)
     assert len(alerts_of_kind(alerts, "slow_scan")) >= 1
-
-def alert_keys(alerts, only_notified):
-    keys = set()
-    for alert in alerts:
-        if only_notified and not alert.get("notified", True):
-            continue
-        keys.add((alert["source"], alert["destination"], alert["kind"]))
-    return keys
-
-def test_decoy_replay_notifies_every_key_but_fewer_alerts(alert_log):
-    require_capture(DECOY_CAPTURE)
-    replay_capture(DECOY_CAPTURE)
-    alerts = read_logged_alerts(alert_log)
-    logged_keys = alert_keys(alerts, False)
-    notified_keys = alert_keys(alerts, True)
-    notified_count = 0
-    for alert in alerts:
-        if alert["notified"]:
-            notified_count = notified_count + 1
-    assert notified_keys == logged_keys
-    assert notified_count < len(alerts)
 
 SCANNER = "192.168.1.236"
 ROUTER = "192.168.1.1"

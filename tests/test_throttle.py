@@ -66,3 +66,64 @@ def test_new_kind_or_new_source_is_notified_immediately(throttle_log):
     emit_alert(make_alert("port_scan", OTHER_ATTACKER), "test", START_TIME + SMALL_STEP)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 3
+
+from live_ids import family_of
+
+UNMAPPED_KIND_A = "future_tracker_a"
+UNMAPPED_KIND_B = "future_tracker_b"
+
+
+def test_family_of_known_kinds_and_fail_safe_for_unknown():
+    assert family_of("port_scan") == "recon"
+    assert family_of("slow_scan") == "recon"
+    assert family_of("stealth_scan") == "evasion"
+    assert family_of(UNMAPPED_KIND_A) == UNMAPPED_KIND_A
+
+
+def test_same_family_detectors_notified_once(throttle_log):
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    alerts = read_logged_alerts(throttle_log)
+    assert len(alerts) == 2
+    assert count_notified(alerts) == 1
+
+
+def test_evasion_after_recon_is_notified(throttle_log):
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME)
+    emit_alert(make_alert("stealth_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    alerts = read_logged_alerts(throttle_log)
+    assert count_notified(alerts) == 2
+
+
+def test_recon_after_evasion_is_covered(throttle_log):
+    emit_alert(make_alert("stealth_scan", ATTACKER), "test", START_TIME)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    alerts = read_logged_alerts(throttle_log)
+    assert count_notified(alerts) == 1
+
+
+def test_flood_after_recon_is_notified(throttle_log):
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
+    emit_alert(make_alert("dos", ATTACKER), "test", START_TIME + SMALL_STEP)
+    alerts = read_logged_alerts(throttle_log)
+    assert count_notified(alerts) == 2
+
+
+def test_unknown_kinds_never_merge(throttle_log):
+    emit_alert(make_alert(UNMAPPED_KIND_A, ATTACKER), "test", START_TIME)
+    emit_alert(make_alert(UNMAPPED_KIND_B, ATTACKER), "test", START_TIME + SMALL_STEP)
+    alerts = read_logged_alerts(throttle_log)
+    assert count_notified(alerts) == 2
+
+
+def test_next_notice_lists_silent_detectors(throttle_log):
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + 2 * SMALL_STEP)
+    after_cooldown = START_TIME + ALERT_COOLDOWN_SECONDS
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", after_cooldown)
+    alerts = read_logged_alerts(throttle_log)
+    last = alerts[-1]
+    assert last["notified"] is True
+    assert last["suppressed_repeats"] == 2
+    assert last["suppressed_kinds"] == {"port_scan": 2}

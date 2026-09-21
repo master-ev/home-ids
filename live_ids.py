@@ -21,6 +21,7 @@ def require_file(path, hint):
         print(f"    {hint}")
         print("    Run 'venv/bin/python setup_check.py' for the full checklist.")
         sys.exit(1)
+
 FRAGMENT_FLOOD_THRESHOLD = 30
 MODEL_ALERT_MIN_CONFIDENCE = 0.70
 USE_V2 = True
@@ -56,7 +57,25 @@ ANOMALY_CONTAMINATION = 0.05
 ANOMALY_RANDOM_SEED = 42
 ALERT_COOLDOWN_SECONDS = 60
 last_notified_time = {}
-suppressed_counts = defaultdict(int)
+suppressed_kinds = defaultdict(Counter)
+KIND_FAMILY = {
+    "port_scan": "recon",
+    "slow_scan": "recon",
+    "distributed_scan": "recon",
+    "udp_scan": "recon",
+    "stealth_scan": "evasion",
+    "fragmented_scan": "evasion",
+    "brute_force": "access",
+    "dos": "flood",
+    "syn_flood": "flood",
+    "icmp_flood": "flood",
+    "slowloris": "flood",
+    "anomaly": "anomaly",
+    "suspicious": "unclassified",
+}
+FAMILY_COVERS = {
+    "evasion": ["recon"],
+}
 FRAGMENT_EPISODE_GAP_SECONDS = 60
 SLOWLORIS_EPISODE_GAP_SECONDS = 60
 frag_last_seen = {}
@@ -162,6 +181,26 @@ def cooldown_allows(last_time, now, cooldown_seconds):
         return True
     return False
 
+def family_of(kind):
+    family = KIND_FAMILY.get(kind)
+    if family is None:
+        return kind
+    return family
+
+def families_that_block(family):
+    blocking = [family]
+    for covering_family, covered_list in FAMILY_COVERS.items():
+        if family in covered_list:
+            blocking.append(covering_family)
+    return blocking
+
+def format_suppressed(kind_counts):
+    parts = []
+    for kind in sorted(kind_counts):
+        count = kind_counts[kind]
+        parts.append(kind + " x" + str(count))
+    return ", ".join(parts)
+
 def episode_starts(last_seen, now, gap_seconds):
     if last_seen is None:
         return True
@@ -171,23 +210,39 @@ def episode_starts(last_seen, now, gap_seconds):
     return False
 
 def emit_alert(alert, console_text, window_time):
-    key = (alert["source"], alert["destination"], alert["kind"])
-    last_time = last_notified_time.get(key)
-    notify = cooldown_allows(last_time, window_time, ALERT_COOLDOWN_SECONDS)
-    if notify:
-        repeats = suppressed_counts[key]
-        suppressed_counts[key] = 0
-        last_notified_time[key] = window_time
-        alert["notified"] = True
-        alert["suppressed_repeats"] = repeats
+    source = alert["source"]
+    destination = alert["destination"]
+    kind = alert["kind"]
+    family = family_of(kind)
+    alert["family"] = family
+    blocking_key = None
+    for candidate_family in families_that_block(family):
+        candidate_key = (source, destination, candidate_family)
+        last_time = last_notified_time.get(candidate_key)
+        if not cooldown_allows(last_time, window_time, ALERT_COOLDOWN_SECONDS):
+            blocking_key = candidate_key
+            break
+    if blocking_key is None:
+        own_key = (source, destination, family)
+        silent_kinds = suppressed_kinds[own_key]
+        repeats = 0
+        for silent_kind in silent_kinds:
+            repeats = repeats + silent_kinds[silent_kind]
         repeat_text = ""
         if repeats > 0:
-            repeat_text = f" (+{repeats} similar since last notice)"
+            repeat_text = f" (+{repeats} similar since last notice: {format_suppressed(silent_kinds)})"
+        alert["notified"] = True
+        alert["suppressed_repeats"] = repeats
+        alert["suppressed_kinds"] = dict(silent_kinds)
+        suppressed_kinds[own_key] = Counter()
+        last_notified_time[own_key] = window_time
         now_str = datetime.now().strftime("%H:%M:%S")
         print(f"[{now_str}] ALERT: {console_text}{repeat_text}")
+        notify = True
     else:
-        suppressed_counts[key] = suppressed_counts[key] + 1
+        suppressed_kinds[blocking_key][kind] = suppressed_kinds[blocking_key][kind] + 1
         alert["notified"] = False
+        notify = False
     log_alert(alert)
     return notify
 
@@ -226,7 +281,7 @@ def reset_live_state():
     frag_last_seen.clear()
     slowloris_last_seen.clear()
     last_notified_time.clear()
-    suppressed_counts.clear()
+    suppressed_kinds.clear()
 
 def report_stealth_scans(packets, window_time):
     stealth_input = extract_tcp_info(packets)
@@ -301,7 +356,6 @@ def analyze_window(packets):
         alert = {"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None}
         emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
     stealth_sources = report_stealth_scans(packets, window_time)
-
     flows = defaultdict(list)
     for p in packets:
         info = get_ips_ports(p)
@@ -406,7 +460,7 @@ def run_live():
     INTERFACE = active_interface(ROUTER_IP)
     print(f"Auto-detected interface: {INTERFACE}")
     load_models()
-    print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows, " f"notification cooldown {ALERT_COOLDOWN_SECONDS}s\n")
+    print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows, " f"notification cooldown {ALERT_COOLDOWN_SECONDS}s per family\n")
     try:
         while True:
             packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp or icmp")
