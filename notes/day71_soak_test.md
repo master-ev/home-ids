@@ -6,13 +6,11 @@ ack_scan and the column still said yes. New column: logged kinds that do not des
 the capture (acceptable = expected kind + slow_scan/distributed_scan on scans).
 First result: <FILL IN, expected ~3/20: slowloris on syn_flood1/2 and dos>
 
-## Soak test
-- Setup: live_ids.py --log soak_day71.jsonl, session file with windows/packets,
-  NO attacks during the run -> every alert is a false positive by construction
-- Duration: <FILL IN> h, windows <FILL IN> (expected ~720/h), packets <FILL IN>
-- Logged: <FILL IN> (<rate>/h)   Notified: <FILL IN> (<rate>/h)
-- By kind / family: <FILL IN>
-- Traffic during the run: <browsing / streaming / updates / phones ...>
+## Soak test - FIRST ATTEMPT INVALID
+live_ids.py --log in WSL: 75 windows (6 min), 0 PACKETS, 0 alerts.
+Zero observations, not zero false positives. The first version of soak_report.py
+printed 0.00/h without any warning - the tool was wrong too.
+Diagnosis and a valid soak: see day 72.
 
 ## Findings
 <FILL IN per notified alert type: which detector, which traffic, hypothesis>
