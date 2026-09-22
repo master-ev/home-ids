@@ -1,11 +1,12 @@
 import pandas as pd
 from build_normal_flows import split_by_time, SPLIT_FRACTION
-from live_ids import load_extra_normal_flows, FLOW_METADATA_COLUMNS
+from live_ids import load_extra_normal_flows, FLOW_METADATA_COLUMNS, ANOMALY_CONTAMINATION
 
 
 FLOW_COUNT = 10
 FIRST_TIME = 1000.0
 STEP = 5.0
+MAX_JUSTIFIED_CONTAMINATION = 0.05
 
 def build_frame():
     rows = []
@@ -27,4 +28,7 @@ def test_metadata_columns_are_not_used_as_features(tmp_path):
     frame = load_extra_normal_flows(str(csv_path))
     for column in FLOW_METADATA_COLUMNS:
         assert column not in frame.columns
-    assert "packet_count" in frame.columns    
+    assert "packet_count" in frame.columns
+
+def test_contamination_stays_at_the_diagnosed_value():
+    assert ANOMALY_CONTAMINATION <= MAX_JUSTIFIED_CONTAMINATION
