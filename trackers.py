@@ -8,6 +8,7 @@ SLOWLORIS_MIN_WINDOWS = 3
 ICMP_PROTO = "ICMP"
 MORE_FRAGMENTS_FLAG = 1
 NO_FRAGMENT_OFFSET = 0
+ACK_SCAN_MIN_PORTS = 10
 
 def is_fragment(packet):
     if IP not in packet:
@@ -155,3 +156,43 @@ def counts_as_scan_probe(first_tcp_flags):
     if has_ack:
         return False
     return True
+
+def is_lone_ack_probe(packet_infos):
+    if len(packet_infos) == 0:
+        return False
+    first_from_initiator, first_flags, first_payload = packet_infos[0]
+    if not first_from_initiator:
+        return False
+    for from_initiator, flags, payload_length in packet_infos:
+        base_flags = flags & TCP_BASE_FLAGS_MASK
+        if from_initiator:
+            is_pure_ack = base_flags == TCP_ACK
+            is_empty = payload_length == 0
+            if not (is_pure_ack and is_empty):
+                return False
+        else:
+            has_rst = (base_flags & TCP_RST) != 0
+            if not has_rst:
+                return False
+    return True
+
+def detect_ack_scans(flow_probes):
+    per_source = {}
+    for flow in flow_probes:
+        src, dst, dport, is_probe = flow
+        if not is_probe:
+            continue
+        if src not in per_source:
+            per_source[src] = {"probes": 0, "ports": set(), "dsts": set()}
+        stats = per_source[src]
+        stats["probes"] = stats["probes"] + 1
+        stats["ports"].add(dport)
+        stats["dsts"].add(dst)
+    alerts = []
+    for src in sorted(per_source):
+        stats = per_source[src]
+        port_count = len(stats["ports"])
+        if port_count >= ACK_SCAN_MIN_PORTS:
+            alert = {"src": src, "probes": stats["probes"], "ports": port_count, "dsts": sorted(stats["dsts"]),}
+            alerts.append(alert)
+    return alerts
