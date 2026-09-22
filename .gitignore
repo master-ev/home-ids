@@ -10,3 +10,5 @@ sample_alerts.jsonl
 my_dataset_v2.csv
 soak_*.jsonl
 soak_*.session.json
+*.pcapng
+loco_run*.txt
