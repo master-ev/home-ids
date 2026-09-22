@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-22 19:12 at commit `9048ec5` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-22 19:48 at commit `2fd4c49` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
@@ -10,6 +10,7 @@ Generated 2026-09-22 19:12 at commit `9048ec5` (+ uncommitted changes) by `metri
 > *Logged* = alerts written to the log (evidence, used by incidents.py).
 > *Notified* = alerts shown to the human (one per source/destination/family per cooldown).
 > *Label shown* = the expected label appears in the console, not only in the log.
+> *Wrong in log* = logged labels that do not describe the capture (end up in incidents).
 
 ## Summary
 
@@ -17,32 +18,33 @@ Generated 2026-09-22 19:12 at commit `9048ec5` (+ uncommitted changes) by `metri
 - **In-training attack captures**: detected 12/12, correctly labelled 12/12
 - **Attack alerts**: 175 logged, 39 notified (cooldown 60 s per source/destination/family)
 - **Expected label shown to the human**: 20/20 attack captures
+- **Attack captures with wrong labels in log**: 3/20
 - **Normal captures with any alert**: 0/10 (0 alerts total)
 
 ## Attack captures
 
-| Capture | Expected | In training | Detected | Correct label | Label shown | Logged | Notified | Shown kinds | Alert kinds |
-|---|---|---|---|---|---|---|---|---|---|
-| scan.pcap | port_scan | yes | yes | yes | yes | 4 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x2, slow_scan x1 |
-| bruteforce.pcap | brute_force | yes | yes | yes | yes | 1 | 1 | brute_force x1 | brute_force x1 |
-| dos.pcap | dos | yes | yes | yes | yes | 5 | 1 | dos x1 | dos x4, slowloris x1 |
-| decoy.pcap | port_scan | yes | yes | yes | yes | 79 | 7 | distributed_scan x1, port_scan x6 | distributed_scan x1, port_scan x72, slow_scan x6 |
-| scan_syn_lo.pcap | port_scan | yes | yes | yes | yes | 3 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x1, slow_scan x1 |
-| scan_slow_router.pcap | port_scan | yes | yes | yes | yes | 5 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x3, slow_scan x1 |
-| scan_connect_router.pcap | port_scan | yes | yes | yes | yes | 5 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x3, slow_scan x1 |
-| decoy2_router.pcap | port_scan | yes | yes | yes | yes | 16 | 4 | distributed_scan x1, port_scan x3 | distributed_scan x1, port_scan x12, slow_scan x3 |
-| udp_scan1.pcap | udp_scan | yes | yes | yes | yes | 13 | 2 | distributed_scan x1, udp_scan x1 | distributed_scan x1, slow_scan x1, udp_scan x11 |
-| udp_scan2.pcap | udp_scan | yes | yes | yes | yes | 13 | 2 | distributed_scan x1, udp_scan x1 | distributed_scan x1, slow_scan x1, udp_scan x11 |
-| syn_flood1.pcap | syn_flood | yes | yes | yes | yes | 5 | 1 | syn_flood x1 | slowloris x1, syn_flood x4 |
-| syn_flood2.pcap | syn_flood | yes | yes | yes | yes | 5 | 1 | syn_flood x1 | slowloris x1, syn_flood x4 |
-| stealth_sX.pcap | stealth_scan | no | yes | yes | yes | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
-| stealth_sN.pcap | stealth_scan | no | yes | yes | yes | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
-| stealth_sF.pcap | stealth_scan | no | yes | yes | yes | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
-| frag_scan.pcap | fragmented_scan | no | yes | yes | yes | 1 | 1 | fragmented_scan x1 | fragmented_scan x1 |
-| frag_normal.pcap | port_scan | no | yes | yes | yes | 4 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x2, slow_scan x1 |
-| slowloris1.pcap | slowloris | no | yes | yes | yes | 1 | 1 | slowloris x1 | slowloris x1 |
-| slowloris_test.pcap | slowloris | no | yes | yes | yes | 1 | 1 | slowloris x1 | slowloris x1 |
-| ack_scan.pcap | ack_scan | no | yes | yes | yes | 2 | 1 | ack_scan x1 | ack_scan x2 |
+| Capture | Expected | In training | Detected | Correct label | Label shown | Wrong in log | Logged | Notified | Shown kinds | Alert kinds |
+|---|---|---|---|---|---|---|---|---|---|---|
+| scan.pcap | port_scan | yes | yes | yes | yes | - | 4 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x2, slow_scan x1 |
+| bruteforce.pcap | brute_force | yes | yes | yes | yes | - | 1 | 1 | brute_force x1 | brute_force x1 |
+| dos.pcap | dos | yes | yes | yes | yes | slowloris x1 | 5 | 1 | dos x1 | dos x4, slowloris x1 |
+| decoy.pcap | port_scan | yes | yes | yes | yes | - | 79 | 7 | distributed_scan x1, port_scan x6 | distributed_scan x1, port_scan x72, slow_scan x6 |
+| scan_syn_lo.pcap | port_scan | yes | yes | yes | yes | - | 3 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x1, slow_scan x1 |
+| scan_slow_router.pcap | port_scan | yes | yes | yes | yes | - | 5 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x3, slow_scan x1 |
+| scan_connect_router.pcap | port_scan | yes | yes | yes | yes | - | 5 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x3, slow_scan x1 |
+| decoy2_router.pcap | port_scan | yes | yes | yes | yes | - | 16 | 4 | distributed_scan x1, port_scan x3 | distributed_scan x1, port_scan x12, slow_scan x3 |
+| udp_scan1.pcap | udp_scan | yes | yes | yes | yes | - | 13 | 2 | distributed_scan x1, udp_scan x1 | distributed_scan x1, slow_scan x1, udp_scan x11 |
+| udp_scan2.pcap | udp_scan | yes | yes | yes | yes | - | 13 | 2 | distributed_scan x1, udp_scan x1 | distributed_scan x1, slow_scan x1, udp_scan x11 |
+| syn_flood1.pcap | syn_flood | yes | yes | yes | yes | slowloris x1 | 5 | 1 | syn_flood x1 | slowloris x1, syn_flood x4 |
+| syn_flood2.pcap | syn_flood | yes | yes | yes | yes | slowloris x1 | 5 | 1 | syn_flood x1 | slowloris x1, syn_flood x4 |
+| stealth_sX.pcap | stealth_scan | no | yes | yes | yes | - | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
+| stealth_sN.pcap | stealth_scan | no | yes | yes | yes | - | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
+| stealth_sF.pcap | stealth_scan | no | yes | yes | yes | - | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
+| frag_scan.pcap | fragmented_scan | no | yes | yes | yes | - | 1 | 1 | fragmented_scan x1 | fragmented_scan x1 |
+| frag_normal.pcap | port_scan | no | yes | yes | yes | - | 4 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x2, slow_scan x1 |
+| slowloris1.pcap | slowloris | no | yes | yes | yes | - | 1 | 1 | slowloris x1 | slowloris x1 |
+| slowloris_test.pcap | slowloris | no | yes | yes | yes | - | 1 | 1 | slowloris x1 | slowloris x1 |
+| ack_scan.pcap | ack_scan | no | yes | yes | yes | - | 2 | 1 | ack_scan x1 | ack_scan x2 |
 
 ## Normal captures (false alerts)
 
@@ -65,7 +67,7 @@ so for them this is in-sample. `dns_normal.pcap` is held out.
 ## Tests
 
 ```
-121 passed in 206.72s (0:03:26)
+127 passed in 211.01s (0:03:31)
 ```
 
 ## LOCO (model generalization, last lines)
