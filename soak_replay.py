@@ -7,6 +7,16 @@ import live_ids
 
 PROGRESS_EVERY_WINDOWS = 120
 
+def parse_after_argument(argv):
+    if "--after" not in argv:
+        return None
+    flag_index = argv.index("--after")
+    value_index = flag_index + 1
+    if value_index >= len(argv):
+        print("Usage: ... soak_replay.py capture.pcapng log.jsonl [--after EPOCH]")
+        sys.exit(1)
+    return float(argv[value_index])
+
 def to_iso(timestamp):
     return datetime.fromtimestamp(timestamp).isoformat()
 
@@ -26,6 +36,7 @@ def main():
         return
     capture_path = sys.argv[1]
     log_path = sys.argv[2]
+    after_time = parse_after_argument(sys.argv)
     live_ids.load_models()
     live_ids.reset_live_state()
     if os.path.exists(log_path):
@@ -39,6 +50,9 @@ def main():
     packets = 0
     with PcapReader(capture_path) as reader:
         for pkt in reader:
+            pkt_time = float(pkt.time)
+            if after_time is not None and pkt_time < after_time:
+                continue
             pkt_time = float(pkt.time)
             if first_time is None:
                 first_time = pkt_time

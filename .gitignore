@@ -12,3 +12,4 @@ soak_*.jsonl
 soak_*.session.json
 *.pcapng
 loco_run*.txt
+soak_normal_*.csv
