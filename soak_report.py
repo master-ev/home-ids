@@ -39,6 +39,12 @@ def session_hours(session):
     seconds = (end - start).total_seconds()
     return seconds / SECONDS_PER_HOUR
 
+def is_valid_session(session):
+    if session is None:
+        return False
+    packet_count = session.get("packets", 0)
+    return packet_count > 0
+
 def rate_per_hour(count, hours):
     if hours is None or hours <= 0:
         return None
@@ -95,6 +101,10 @@ def main():
     alerts = read_jsonl(log_path)
     notified = only_notified(alerts)
     hours = session_hours(session)
+    if not is_valid_session(session):
+        print("[!] INVALID SOAK: no packets were seen by the sensor.")
+        print("    0 alerts here means nothing. Check what the sensor can see (day 72).")
+        return
     print("Soak test report")
     if session is None:
         print("[!] No session file: duration unknown")

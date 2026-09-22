@@ -49,6 +49,7 @@ conf.use_pcap = True
 WINDOW_SECONDS = 5
 SESSION_SUFFIX = ".session.json"
 SESSION_SAVE_EVERY_WINDOWS = 60
+EMPTY_WINDOWS_WARNING = 12
 ALERT_LOG = "alerts.jsonl"
 NORMAL_LABEL = "normal"
 ANOMALY_VERDICT = "anomaly"
@@ -573,9 +574,17 @@ def run_live(log_path):
         write_session(session_path, session)
         print(f"Soak session: alerts -> {log_path}, session -> {session_path}")
     print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows, " f"notification cooldown {ALERT_COOLDOWN_SECONDS}s per family\n")
+    consecutive_empty = 0
     try:
         while True:
             packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp or icmp")
+            if len(packets) == 0:
+                consecutive_empty = consecutive_empty + 1
+                if consecutive_empty == EMPTY_WINDOWS_WARNING:
+                    silent_seconds = EMPTY_WINDOWS_WARNING * WINDOW_SECONDS
+                    print(f"[!] No packets for {silent_seconds}s on {INTERFACE} - is this sensor seeing any traffic? (ip route get 1.1.1.1)")
+            else:
+                consecutive_empty = 0
             analyze_window(packets)
             if session is not None:
                 session["windows"] = session["windows"] + 1
