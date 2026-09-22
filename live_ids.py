@@ -92,6 +92,7 @@ FRAGMENT_EPISODE_GAP_SECONDS = 60
 SLOWLORIS_EPISODE_GAP_SECONDS = 60
 frag_last_seen = {}
 slowloris_last_seen = {}
+slowloris_previous_conns = {}
 classifier = None
 clf_features = None
 classifier_v2 = None
@@ -140,6 +141,38 @@ def flow_ack_probe(pkts):
         packet_infos.append((from_initiator, flags, payload_length))
     is_probe = is_lone_ack_probe(packet_infos)
     return (first[IP].src, first[IP].dst, first[TCP].dport, is_probe)
+
+def slowloris_triple(info):
+    src, dst, sport, dport, proto = info
+    hosts = sorted([src, dst])
+    server_port = min(sport, dport)
+    return (hosts[0], hosts[1], server_port)
+
+def slowloris_flow_summaries(flows):
+    summaries = []
+    for key, pkts in flows.items():
+        first = pkts[0]
+        if not (IP in first and TCP in first):
+            continue
+        info = get_ips_ports(first)
+        initiator = first[IP].src
+        initiator_ack = False
+        closed = False
+        for pkt in pkts:
+            if not (IP in pkt and TCP in pkt):
+                continue
+            base_flags = int(pkt[TCP].flags) & trackers.TCP_BASE_FLAGS_MASK
+            from_initiator = pkt[IP].src == initiator
+            has_ack = (base_flags & trackers.TCP_ACK) != 0
+            if from_initiator and has_ack:
+                initiator_ack = True
+            is_fin = (base_flags & trackers.TCP_FIN) != 0
+            is_rst = (base_flags & trackers.TCP_RST) != 0
+            if is_fin or is_rst:
+                closed = True
+        summary = {"triple": slowloris_triple(info), "conn": key, "packets": len(pkts), "initiator_ack": initiator_ack, "closed": closed}
+        summaries.append(summary)
+    return summaries
 
 def report_ack_scans(flow_list, pending):
     flow_probes = []
@@ -375,6 +408,7 @@ def reset_live_state():
     slowloris_alerted.clear()
     frag_last_seen.clear()
     slowloris_last_seen.clear()
+    slowloris_previous_conns.clear()
     last_notified_time.clear()
     last_notified_specificity.clear()
     suppressed_kinds.clear()
@@ -544,7 +578,17 @@ def collect_window_alerts(packets, window_time, pending):
             confidence_text = f" conf={confidence:.2f}"
         alert = {"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence}
         pending.append((alert, f"{desc} {src} -> {dst} (model: {main_verdict}{confidence_text})"))
-    for triple, count in trackers.slowloris_candidates(flow_list):
+    summaries = slowloris_flow_summaries(flows)
+    current_conns = trackers.held_open_connections(summaries)
+    for triple in sorted(current_conns):
+        conns = current_conns[triple]
+        previous_conns = slowloris_previous_conns.get(triple, set())
+        slowloris_previous_conns[triple] = conns
+        if len(conns) < trackers.SLOWLORIS_MIN_CONNECTIONS:
+            continue
+        persistent = trackers.persistent_connections(conns, previous_conns)
+        if len(persistent) < trackers.SLOWLORIS_MIN_PERSISTENT:
+            continue
         last_seen = slowloris_last_seen.get(triple)
         slowloris_last_seen[triple] = window_time
         if episode_starts(last_seen, window_time, SLOWLORIS_EPISODE_GAP_SECONDS):
@@ -556,9 +600,9 @@ def collect_window_alerts(packets, window_time, pending):
             slowloris_alerted.add(triple)
             host_a, host_b, port = triple
             timestamp = datetime.now().isoformat()
-            desc = f"SLOWLORIS ({count} slow connections on port {port})"
-            alert = {"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None}
-            pending.append((alert, f"{desc} {host_a} <-> {host_b}"))
+            desc = f"SLOWLORIS ({len(persistent)} connections held open on port {port})"
+            alert = {"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": len(conns), "num_ports": 1, "model_verdict": "slowloris", "confidence": None}
+            pending.append((alert, f"{desc} {host_a} <-> {host_b}"))  
 
 def parse_log_argument(argv):
     if "--log" not in argv:

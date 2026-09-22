@@ -196,3 +196,23 @@ def detect_ack_scans(flow_probes):
             alert = {"src": src, "probes": stats["probes"], "ports": port_count, "dsts": sorted(stats["dsts"]),}
             alerts.append(alert)
     return alerts
+
+SLOWLORIS_MIN_PERSISTENT = 10
+
+def held_open_connections(flow_summaries):
+    per_triple = {}
+    for summary in flow_summaries:
+        if summary["packets"] > SLOWLORIS_MAX_PKTS_PER_CONN:
+            continue
+        if not summary["initiator_ack"]:
+            continue
+        if summary["closed"]:
+            continue
+        triple = summary["triple"]
+        if triple not in per_triple:
+            per_triple[triple] = set()
+        per_triple[triple].add(summary["conn"])
+    return per_triple
+
+def persistent_connections(current_conns, previous_conns):
+    return current_conns & previous_conns

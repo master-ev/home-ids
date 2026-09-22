@@ -1,7 +1,6 @@
 from scapy.all import IP, TCP, ICMP, Ether
 import trackers
-from trackers import counts_as_scan_probe
-from trackers import is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS
+from trackers import counts_as_scan_probe, is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS, held_open_connections, persistent_connections, SLOWLORIS_MIN_PERSISTENT
 
 FROM_SCANNER = True
 FROM_TARGET = False
@@ -11,6 +10,9 @@ ATTACKER = "192.168.1.244"
 TARGET = "192.168.1.1"
 SERVER_PORT = 80
 CLIENT_PORT = 46000
+SERVER_TRIPLE = ("10.0.0.5", "192.168.1.1", 80)
+FEW_PACKETS = 4
+MANY_PACKETS = 50
 
 def build(packet):
     return Ether(bytes(packet))
@@ -227,3 +229,33 @@ def test_same_port_repeated_is_not_ack_scan():
     for index in range(repeat_count):
         flows.append((ATTACKER, VICTIM, FIRST_PORT, True))
     assert detect_ack_scans(flows) == []
+
+def summary(conn, packets=FEW_PACKETS, initiator_ack=True, closed=False):
+    return {"triple": SERVER_TRIPLE, "conn": conn, "packets": packets, "initiator_ack": initiator_ack, "closed": closed}
+
+def test_half_open_connections_are_not_held_open():
+    summaries = [summary("c1", initiator_ack=False), summary("c2", initiator_ack=False)]
+    assert held_open_connections(summaries) == {}
+
+def test_closed_connections_are_not_held_open():
+    summaries = [summary("c1", closed=True), summary("c2", closed=True)]
+    assert held_open_connections(summaries) == {}
+
+def test_chatty_connections_are_not_held_open():
+    summaries = [summary("c1", packets=MANY_PACKETS)]
+    assert held_open_connections(summaries) == {}
+
+def test_quiet_established_connections_are_held_open():
+    summaries = [summary("c1"), summary("c2")]
+    held = held_open_connections(summaries)
+    assert held[SERVER_TRIPLE] == {"c1", "c2"}
+
+def test_persistent_connections_are_the_shared_ones():
+    current = {"c1", "c2", "c3"}
+    previous = {"c2", "c3", "c9"}
+    assert persistent_connections(current, previous) == {"c2", "c3"}
+
+def test_new_connections_every_window_are_not_persistent():
+    current = {"n1", "n2", "n3"}
+    previous = {"o1", "o2", "o3"}
+    assert persistent_connections(current, previous) == set()

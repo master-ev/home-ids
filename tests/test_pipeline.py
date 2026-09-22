@@ -5,6 +5,7 @@ from scapy.all import rdpcap
 import live_ids
 from incidents import load_alerts, compute_severity, SEVERITY_MEDIUM
 from replay import split_into_windows, read_logged_alerts, replay_to_log
+from live_ids import family_of, families_that_block
 
 STEALTH_CAPTURE = "stealth_sX.pcap"
 FRAGMENT_CAPTURE = "frag_scan.pcap"
@@ -18,16 +19,12 @@ CONNECT_SCAN_CAPTURE = "scan_connect_router.pcap"
 ACK_SCAN_CAPTURE = "ack_scan.pcap"
 ACK_FALSE_POSITIVE_CAPTURES = ["normal_web.pcap", "normal_stream.pcap", "normal_mixed.pcap", "dns_div2.pcap", "dns_normal.pcap"]
 
-from live_ids import family_of, families_that_block
-
-
 def notified_family_keys(alerts):
     keys = set()
     for alert in alerts:
         if alert.get("notified", True):
             keys.add((alert["source"], alert["destination"], family_of(alert["kind"])))
     return keys
-
 
 def is_covered(alert, notified_keys):
     family = family_of(alert["kind"])
@@ -36,7 +33,6 @@ def is_covered(alert, notified_keys):
         if candidate_key in notified_keys:
             return True
     return False
-
 
 def test_decoy_replay_every_alert_covered_by_a_notice(alert_log):
     require_capture(DECOY_CAPTURE)
@@ -245,7 +241,6 @@ def test_ack_scan_replay_logs_and_shows_ack_scan(alert_log):
     assert len(alerts_of_kind(alerts, "ack_scan")) >= 1
     assert "ack_scan" in notified_kinds_in(alerts)
 
-
 @pytest.mark.parametrize("capture", ACK_FALSE_POSITIVE_CAPTURES)
 def test_normal_traffic_raises_no_ack_scan(alert_log, capture):
     require_capture(capture)
@@ -258,3 +253,12 @@ def test_ack_scan_replay_suppresses_udp_scan_label(alert_log):
     replay_capture(ACK_SCAN_CAPTURE)
     alerts = read_logged_alerts(alert_log)
     assert alerts_of_kind(alerts, "udp_scan") == []
+
+NO_SLOWLORIS_CAPTURES = ["syn_flood1.pcap", "syn_flood2.pcap", "dos.pcap", "normal_stream.pcap"]
+
+@pytest.mark.parametrize("capture", NO_SLOWLORIS_CAPTURES)
+def test_floods_are_not_labelled_slowloris(alert_log, capture):
+    require_capture(capture)
+    replay_capture(capture)
+    alerts = read_logged_alerts(alert_log)
+    assert alerts_of_kind(alerts, "slowloris") == []
