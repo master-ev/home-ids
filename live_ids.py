@@ -57,6 +57,8 @@ SCAN_VERDICT = "scan"
 DOS_VERDICT = "dos"
 FLOOD_MIN_FLOWS_PER_PORT = 5
 SCAN_MAX_FLOWS_PER_PORT = 3
+NORMAL_FLOWS_CSV = "soak_normal_train.csv"
+FLOW_METADATA_COLUMNS = ["window_time", "is_ipv6"]
 ANOMALY_CONTAMINATION = 0.05
 ANOMALY_RANDOM_SEED = 42
 ALERT_COOLDOWN_SECONDS = 60
@@ -189,6 +191,13 @@ def load_normal(paths):
     frame = frame.fillna(0)
     return frame
 
+def load_extra_normal_flows(csv_path):
+    frame = pd.read_csv(csv_path)
+    for column in FLOW_METADATA_COLUMNS:
+        if column in frame.columns:
+            frame = frame.drop(columns=[column])
+    return frame
+
 def load_models():
     global classifier, clf_features, classifier_v2, clf_features_v2
     global anomaly_model, anomaly_features
@@ -207,11 +216,17 @@ def load_models():
         print("[!] No normal captures found for the anomaly model.")
         print("    Check the 'normal' entries in scenarios.py.")
         sys.exit(1)
-    normal = load_normal(normal_paths)
+    frames = [load_normal(normal_paths)]
+    extra_source = "lab captures only"
+    if os.path.exists(NORMAL_FLOWS_CSV):
+        extra = load_extra_normal_flows(NORMAL_FLOWS_CSV)
+        frames.append(extra)
+        extra_source = f"lab captures + {len(extra)} real-traffic flows"
+    normal = pd.concat(frames, ignore_index=True).fillna(0)
     anomaly_features = list(normal.columns)
     anomaly_model = IsolationForest(contamination=ANOMALY_CONTAMINATION, random_state=ANOMALY_RANDOM_SEED)
     anomaly_model.fit(normal[anomaly_features])
-    print(f"Anomaly model: {len(normal_paths)} normal captures, {len(normal)} flows, " f"contamination={ANOMALY_CONTAMINATION}")
+    print(f"Anomaly model: {len(normal)} flows ({extra_source}), " f"contamination={ANOMALY_CONTAMINATION}")
 
 def average_confidence(values):
     if len(values) == 0:
