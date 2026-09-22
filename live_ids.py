@@ -14,6 +14,7 @@ from feature_sets import clean_features
 from net_iface import active_interface, ROUTER_IP
 from trackers import detect_stealth_scans
 from scenarios import CAPTURES
+from trackers import detect_stealth_scans, detect_ack_scans, is_lone_ack_probe
 
 def require_file(path, hint):
     if not os.path.exists(path):
@@ -66,6 +67,7 @@ KIND_FAMILY = {
     "udp_scan": "recon",
     "stealth_scan": "evasion",
     "fragmented_scan": "evasion",
+    "ack_scan": "evasion",
     "brute_force": "access",
     "dos": "flood",
     "syn_flood": "flood",
@@ -77,6 +79,7 @@ KIND_FAMILY = {
 FAMILY_COVERS = {
     "evasion": ["recon"],
 }
+HEADER_WORD_BYTES = 4
 SPECIFICITY_GENERIC = 1
 SPECIFICITY_SPECIFIC = 2
 GENERIC_KINDS = ["slow_scan", "distributed_scan", "suspicious"]
@@ -110,6 +113,50 @@ def first_tcp_flags(pkt):
     if TCP in pkt:
         return int(pkt[TCP].flags)
     return None
+
+def tcp_payload_length(pkt):
+    ip_header_bytes = pkt[IP].ihl * HEADER_WORD_BYTES
+    tcp_header_bytes = pkt[TCP].dataofs * HEADER_WORD_BYTES
+    payload_length = pkt[IP].len - ip_header_bytes - tcp_header_bytes
+    return payload_length
+
+def flow_ack_probe(pkts):
+    first = pkts[0]
+    if not (IP in first and TCP in first):
+        return None
+    initiator = first[IP].src
+    packet_infos = []
+    for pkt in pkts:
+        if not (IP in pkt and TCP in pkt):
+            continue
+        from_initiator = pkt[IP].src == initiator
+        flags = int(pkt[TCP].flags)
+        payload_length = tcp_payload_length(pkt)
+        packet_infos.append((from_initiator, flags, payload_length))
+    is_probe = is_lone_ack_probe(packet_infos)
+    return (first[IP].src, first[IP].dst, first[TCP].dport, is_probe)
+
+def report_ack_scans(flow_list, pending):
+    flow_probes = []
+    for pkts in flow_list:
+        probe = flow_ack_probe(pkts)
+        if probe is not None:
+            flow_probes.append(probe)
+    ack_alerts = detect_ack_scans(flow_probes)
+    ack_sources = set()
+    for ack in ack_alerts:
+        src = ack["src"]
+        ack_sources.add(src)
+        dst_list = ack["dsts"]
+        if len(dst_list) == 1:
+            dst = dst_list[0]
+        else:
+            dst = "multiple"
+        desc = f"ACK SCAN ({ack['probes']} lone ACK probes, {ack['ports']} ports - firewall mapping)"
+        timestamp = datetime.now().isoformat()
+        alert = {"timestamp": timestamp, "kind": "ack_scan", "description": desc, "source": src, "destination": dst, "num_flows": ack["probes"], "num_ports": ack["ports"], "model_verdict": "ack_scan", "confidence": None}
+        pending.append((alert, f"{desc} {src} -> {dst}"))
+    return ack_sources
 
 def normal_capture_paths():
     paths = []
@@ -400,6 +447,10 @@ def collect_window_alerts(packets, window_time, pending):
     if not flows:
         return
     flow_list = list(flows.values())
+    ack_sources = report_ack_scans(flow_list, pending)
+    evasion_sources = set(stealth_sources)
+    for ack_source in ack_sources:
+        evasion_sources.add(ack_source)
     context_rows = compute_context(flow_list)
     campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter(), "confidences": []})
     position = 0

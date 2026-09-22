@@ -32,6 +32,7 @@ EXTRA_CASES = [
     ("frag_normal.pcap", "port_scan"),
     ("slowloris1.pcap", "slowloris"),
     ("slowloris_test.pcap", "slowloris"),
+    ("ack_scan.pcap", "ack_scan"),
 ]
 EXTRA_NORMAL_CASES = ["dns_normal.pcap"]
 

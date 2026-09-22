@@ -184,3 +184,7 @@ def test_floods_and_slowloris_are_high():
 def test_single_anomaly_is_low():
     severity = compute_severity("anomaly", SINGLE_ALERT)
     assert severity == SEVERITY_LOW
+
+def test_single_ack_scan_is_medium():
+    severity = compute_severity("ack_scan", SINGLE_ALERT)
+    assert severity == SEVERITY_MEDIUM

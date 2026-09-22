@@ -1,7 +1,12 @@
 from scapy.all import IP, TCP, ICMP, Ether
 import trackers
 from trackers import counts_as_scan_probe
+from trackers import is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS
 
+FROM_SCANNER = True
+FROM_TARGET = False
+EMPTY = 0
+SOME_DATA = 100
 ATTACKER = "192.168.1.244"
 TARGET = "192.168.1.1"
 SERVER_PORT = 80
@@ -178,3 +183,47 @@ def test_replies_and_mid_connection_do_not_count():
 def test_udp_flows_keep_counting():
     udp_has_no_tcp_flags = None
     assert counts_as_scan_probe(udp_has_no_tcp_flags) is True
+
+def test_lone_ack_is_a_probe_with_or_without_rst_reply():
+    no_reply = [(FROM_SCANNER, TCP_ACK, EMPTY)]
+    rst_reply = [(FROM_SCANNER, TCP_ACK, EMPTY), (FROM_TARGET, TCP_RST, EMPTY)]
+    assert is_lone_ack_probe(no_reply) is True
+    assert is_lone_ack_probe(rst_reply) is True
+
+def test_mid_connection_slices_are_not_probes():
+    ack_then_data = [(FROM_SCANNER, TCP_ACK, EMPTY), (FROM_TARGET, TCP_PSH | TCP_ACK, SOME_DATA)]
+    ack_then_ack = [(FROM_SCANNER, TCP_ACK, EMPTY), (FROM_TARGET, TCP_ACK, EMPTY)]
+    data_first = [(FROM_SCANNER, TCP_PSH | TCP_ACK, SOME_DATA)]
+    syn_first = [(FROM_SCANNER, TCP_SYN, EMPTY)]
+    assert is_lone_ack_probe(ack_then_data) is False
+    assert is_lone_ack_probe(ack_then_ack) is False
+    assert is_lone_ack_probe(data_first) is False
+    assert is_lone_ack_probe(syn_first) is False
+
+def build_ack_probes(port_count, is_probe):
+    flows = []
+    for index in range(port_count):
+        port = FIRST_PORT + index
+        flows.append((ATTACKER, VICTIM, port, is_probe))
+    return flows
+
+def test_ack_scan_detected():
+    flows = build_ack_probes(ACK_SCAN_MIN_PORTS, True)
+    alerts = detect_ack_scans(flows)
+    assert len(alerts) == 1
+    assert alerts[0]["src"] == ATTACKER
+
+def test_ack_probes_below_threshold_are_silent():
+    flows = build_ack_probes(ACK_SCAN_MIN_PORTS - 1, True)
+    assert detect_ack_scans(flows) == []
+
+def test_many_ports_without_lone_probes_are_silent():
+    flows = build_ack_probes(ACK_SCAN_MIN_PORTS * 3, False)
+    assert detect_ack_scans(flows) == []
+
+def test_same_port_repeated_is_not_ack_scan():
+    flows = []
+    repeat_count = ACK_SCAN_MIN_PORTS * 2
+    for index in range(repeat_count):
+        flows.append((ATTACKER, VICTIM, FIRST_PORT, True))
+    assert detect_ack_scans(flows) == []

@@ -15,6 +15,8 @@ DNS_CAPTURES = ["normal_dns2.pcap", "dns_div2.pcap", "dns_div3.pcap", "dns_norma
 DECOY_CAPTURE = "decoy.pcap"
 SLOWLORIS_CAPTURE = "slowloris1.pcap"
 CONNECT_SCAN_CAPTURE = "scan_connect_router.pcap"
+ACK_SCAN_CAPTURE = "ack_scan.pcap"
+ACK_FALSE_POSITIVE_CAPTURES = ["normal_web.pcap", "normal_stream.pcap", "normal_mixed.pcap", "dns_div2.pcap", "dns_normal.pcap"]
 
 from live_ids import family_of, families_that_block
 
@@ -28,7 +30,6 @@ def notified_family_keys(alerts):
 
 
 def is_covered(alert, notified_keys):
-    """An alert is covered if its pair got a notice of its family or of a covering family."""
     family = family_of(alert["kind"])
     for candidate_family in families_that_block(family):
         candidate_key = (alert["source"], alert["destination"], candidate_family)
@@ -38,8 +39,6 @@ def is_covered(alert, notified_keys):
 
 
 def test_decoy_replay_every_alert_covered_by_a_notice(alert_log):
-    # Day 66 safety property, at family level since day 68: no (source, destination)
-    # with logged alerts may be silenced completely - every decoy source is shown.
     require_capture(DECOY_CAPTURE)
     replay_capture(DECOY_CAPTURE)
     alerts = read_logged_alerts(alert_log)
@@ -238,3 +237,18 @@ def test_connect_scan_replay_shows_port_scan_label(alert_log):
     replay_capture(CONNECT_SCAN_CAPTURE)
     alerts = read_logged_alerts(alert_log)
     assert "port_scan" in notified_kinds_in(alerts)
+
+def test_ack_scan_replay_logs_and_shows_ack_scan(alert_log):
+    require_capture(ACK_SCAN_CAPTURE)
+    replay_capture(ACK_SCAN_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert len(alerts_of_kind(alerts, "ack_scan")) >= 1
+    assert "ack_scan" in notified_kinds_in(alerts)
+
+
+@pytest.mark.parametrize("capture", ACK_FALSE_POSITIVE_CAPTURES)
+def test_normal_traffic_raises_no_ack_scan(alert_log, capture):
+    require_capture(capture)
+    replay_capture(capture)
+    alerts = read_logged_alerts(alert_log)
+    assert alerts_of_kind(alerts, "ack_scan") == []
