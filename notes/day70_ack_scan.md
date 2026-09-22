@@ -43,3 +43,14 @@ window where the ACK tracker fired (>= 10 ports); edge windows reach the model's
 5-flow threshold but not the tracker's. <FILL IN diagnose_campaigns result>
 "Correct label" did not catch it: it checks the right label exists, not that a
 wrong one is absent.
+
+## Leak found - hypothesis rejected by data
+Log had udp_scan x2 for ack_scan.pcap. First hypothesis (edge windows below the
+ACK tracker threshold) was WRONG: diagnose_campaigns.py showed both udp_scan alerts
+in the SAME windows (2 and 3) as ack_scan. Real cause: the suppression block was
+never replaced - it still checked stealth_sources. The grep already showed it
+(evasion_sources only on the 2 lines that build it).
+Third wiring bug of the project (days 60, 65, 70): the logic was right, the
+connection was missing, and no test checked the output. Added
+test_ack_scan_replay_suppresses_udp_scan_label (red -> green, mutation-checked).
+Diagnosing first avoided building an unneeded cross-window memory.

@@ -252,3 +252,9 @@ def test_normal_traffic_raises_no_ack_scan(alert_log, capture):
     replay_capture(capture)
     alerts = read_logged_alerts(alert_log)
     assert alerts_of_kind(alerts, "ack_scan") == []
+
+def test_ack_scan_replay_suppresses_udp_scan_label(alert_log):
+    require_capture(ACK_SCAN_CAPTURE)
+    replay_capture(ACK_SCAN_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert alerts_of_kind(alerts, "udp_scan") == []

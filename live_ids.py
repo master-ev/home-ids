@@ -514,8 +514,8 @@ def collect_window_alerts(packets, window_time, pending):
         if kind is None:
             continue
         is_udp_scan = kind == "udp_scan"
-        is_stealth_source = src in stealth_sources
-        if is_udp_scan and is_stealth_source:
+        is_evasion_source = src in evasion_sources
+        if is_udp_scan and is_evasion_source:
             continue
         confidence = average_confidence(data["confidences"])
         if confidence is not None and confidence < MODEL_ALERT_MIN_CONFIDENCE:
