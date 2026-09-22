@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-22 18:27 at commit `8665c25` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-22 19:12 at commit `9048ec5` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
@@ -13,10 +13,10 @@ Generated 2026-09-22 18:27 at commit `8665c25` (+ uncommitted changes) by `metri
 
 ## Summary
 
-- **Unseen attack captures**: detected 7/7, correctly labelled 7/7
+- **Unseen attack captures**: detected 8/8, correctly labelled 8/8
 - **In-training attack captures**: detected 12/12, correctly labelled 12/12
-- **Attack alerts**: 173 logged, 38 notified (cooldown 60 s per source/destination/family)
-- **Expected label shown to the human**: 19/19 attack captures
+- **Attack alerts**: 175 logged, 39 notified (cooldown 60 s per source/destination/family)
+- **Expected label shown to the human**: 20/20 attack captures
 - **Normal captures with any alert**: 0/10 (0 alerts total)
 
 ## Attack captures
@@ -42,6 +42,7 @@ Generated 2026-09-22 18:27 at commit `8665c25` (+ uncommitted changes) by `metri
 | frag_normal.pcap | port_scan | no | yes | yes | yes | 4 | 2 | distributed_scan x1, port_scan x1 | distributed_scan x1, port_scan x2, slow_scan x1 |
 | slowloris1.pcap | slowloris | no | yes | yes | yes | 1 | 1 | slowloris x1 | slowloris x1 |
 | slowloris_test.pcap | slowloris | no | yes | yes | yes | 1 | 1 | slowloris x1 | slowloris x1 |
+| ack_scan.pcap | ack_scan | no | yes | yes | yes | 2 | 1 | ack_scan x1 | ack_scan x2 |
 
 ## Normal captures (false alerts)
 
@@ -64,7 +65,7 @@ so for them this is in-sample. `dns_normal.pcap` is held out.
 ## Tests
 
 ```
-107 passed in 186.04s (0:03:06)
+121 passed in 206.72s (0:03:26)
 ```
 
 ## LOCO (model generalization, last lines)
