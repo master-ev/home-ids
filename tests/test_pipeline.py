@@ -181,6 +181,7 @@ def test_stealth_replay_still_raises_slow_scan(alert_log):
 SCANNER = "192.168.1.236"
 ROUTER = "192.168.1.1"
 SLOWLORIS_REPEAT_CAPTURE = "slowloris_test.pcap"
+UDP_SCAN_CAPTURE = "udp_scan1.pcap"
 
 def first_packet_time(path):
     packets = rdpcap(path, count=1)
@@ -218,3 +219,22 @@ def test_same_slowloris_pair_two_captures_alerts_twice(alert_log):
     alerts = read_logged_alerts(alert_log)
     slowloris = alerts_of_kind(alerts, "slowloris")
     assert len(slowloris) == 2
+
+def notified_kinds_in(alerts):
+    kinds = set()
+    for alert in alerts:
+        if alert.get("notified", True):
+            kinds.add(alert["kind"])
+    return kinds
+
+def test_udp_scan_replay_shows_udp_label(alert_log):
+    require_capture(UDP_SCAN_CAPTURE)
+    replay_capture(UDP_SCAN_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert "udp_scan" in notified_kinds_in(alerts)
+
+def test_connect_scan_replay_shows_port_scan_label(alert_log):
+    require_capture(CONNECT_SCAN_CAPTURE)
+    replay_capture(CONNECT_SCAN_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert "port_scan" in notified_kinds_in(alerts)

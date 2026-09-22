@@ -57,6 +57,7 @@ ANOMALY_CONTAMINATION = 0.05
 ANOMALY_RANDOM_SEED = 42
 ALERT_COOLDOWN_SECONDS = 60
 last_notified_time = {}
+last_notified_specificity = {}
 suppressed_kinds = defaultdict(Counter)
 KIND_FAMILY = {
     "port_scan": "recon",
@@ -76,6 +77,9 @@ KIND_FAMILY = {
 FAMILY_COVERS = {
     "evasion": ["recon"],
 }
+SPECIFICITY_GENERIC = 1
+SPECIFICITY_SPECIFIC = 2
+GENERIC_KINDS = ["slow_scan", "distributed_scan", "suspicious"]
 FRAGMENT_EPISODE_GAP_SECONDS = 60
 SLOWLORIS_EPISODE_GAP_SECONDS = 60
 frag_last_seen = {}
@@ -194,6 +198,11 @@ def families_that_block(family):
             blocking.append(covering_family)
     return blocking
 
+def specificity_of(kind):
+    if kind in GENERIC_KINDS:
+        return SPECIFICITY_GENERIC
+    return SPECIFICITY_SPECIFIC
+
 def format_suppressed(kind_counts):
     parts = []
     for kind in sorted(kind_counts):
@@ -214,14 +223,21 @@ def emit_alert(alert, console_text, window_time):
     destination = alert["destination"]
     kind = alert["kind"]
     family = family_of(kind)
+    specificity = specificity_of(kind)
     alert["family"] = family
     blocking_key = None
+    is_upgrade = False
     for candidate_family in families_that_block(family):
         candidate_key = (source, destination, candidate_family)
         last_time = last_notified_time.get(candidate_key)
-        if not cooldown_allows(last_time, window_time, ALERT_COOLDOWN_SECONDS):
-            blocking_key = candidate_key
-            break
+        if cooldown_allows(last_time, window_time, ALERT_COOLDOWN_SECONDS):
+            continue
+        shown_specificity = last_notified_specificity.get(candidate_key, SPECIFICITY_GENERIC)
+        if specificity > shown_specificity:
+            is_upgrade = True
+            continue
+        blocking_key = candidate_key
+        break
     if blocking_key is None:
         own_key = (source, destination, family)
         silent_kinds = suppressed_kinds[own_key]
@@ -231,13 +247,18 @@ def emit_alert(alert, console_text, window_time):
         repeat_text = ""
         if repeats > 0:
             repeat_text = f" (+{repeats} similar since last notice: {format_suppressed(silent_kinds)})"
+        upgrade_text = ""
+        if is_upgrade:
+            upgrade_text = " [more specific than the earlier notice]"
         alert["notified"] = True
+        alert["upgrade"] = is_upgrade
         alert["suppressed_repeats"] = repeats
         alert["suppressed_kinds"] = dict(silent_kinds)
         suppressed_kinds[own_key] = Counter()
         last_notified_time[own_key] = window_time
+        last_notified_specificity[own_key] = specificity
         now_str = datetime.now().strftime("%H:%M:%S")
-        print(f"[{now_str}] ALERT: {console_text}{repeat_text}")
+        print(f"[{now_str}] ALERT: {console_text}{upgrade_text}{repeat_text}")
         notify = True
     else:
         suppressed_kinds[blocking_key][kind] = suppressed_kinds[blocking_key][kind] + 1
@@ -245,6 +266,15 @@ def emit_alert(alert, console_text, window_time):
         notify = False
     log_alert(alert)
     return notify
+
+def pending_specificity(item):
+    alert = item[0]
+    return specificity_of(alert["kind"])
+
+def flush_window_alerts(pending, window_time):
+    ordered = sorted(pending, key=pending_specificity, reverse=True)
+    for alert, console_text in ordered:
+        emit_alert(alert, console_text, window_time)
 
 def check_slow_scan(src, dst, dport, now):
     key = (src, dst)
@@ -281,9 +311,10 @@ def reset_live_state():
     frag_last_seen.clear()
     slowloris_last_seen.clear()
     last_notified_time.clear()
+    last_notified_specificity.clear()
     suppressed_kinds.clear()
 
-def report_stealth_scans(packets, window_time):
+def report_stealth_scans(packets, pending):
     stealth_input = extract_tcp_info(packets)
     stealth_alerts = detect_stealth_scans(stealth_input)
     stealth_sources = set()
@@ -301,7 +332,7 @@ def report_stealth_scans(packets, window_time):
         desc = f"STEALTH SCAN ({types_text}, {packet_count} packets, {port_count} ports)"
         timestamp = datetime.now().isoformat()
         alert = {"timestamp": timestamp, "kind": "stealth_scan", "description": desc, "source": src, "destination": dst, "num_flows": packet_count, "num_ports": port_count, "model_verdict": "stealth_scan", "confidence": None}
-        emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
+        pending.append((alert, f"{desc} {src} -> {dst}"))
     return stealth_sources
 
 def flows_per_port(num_flows, num_ports):
@@ -339,6 +370,11 @@ def analyze_window(packets):
     if len(packets) == 0:
         return
     window_time = float(packets[0].time)
+    pending = []
+    collect_window_alerts(packets, window_time, pending)
+    flush_window_alerts(pending, window_time)
+
+def collect_window_alerts(packets, window_time, pending):
     for src, dst, count in trackers.fragment_alerts(packets):
         pair = (src, dst)
         last_seen = frag_last_seen.get(pair)
@@ -349,13 +385,13 @@ def analyze_window(packets):
         timestamp = datetime.now().isoformat()
         desc = f"FRAGMENTED SCAN ({count} fragments - evasion attempt)"
         alert = {"timestamp": timestamp, "kind": "fragmented_scan", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "fragmented_scan", "confidence": None}
-        emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
+        pending.append((alert, f"{desc} {src} -> {dst}"))
     for src, dst, count in trackers.icmp_flood_alerts(packets):
         timestamp = datetime.now().isoformat()
         desc = f"ICMP FLOOD ({count} packets)"
         alert = {"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None}
-        emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
-    stealth_sources = report_stealth_scans(packets, window_time)
+        pending.append((alert, f"{desc} {src} -> {dst}"))
+    stealth_sources = report_stealth_scans(packets, pending)
     flows = defaultdict(list)
     for p in packets:
         info = get_ips_ports(p)
@@ -402,12 +438,12 @@ def analyze_window(packets):
             if slow is not None:
                 desc = f"SLOW PORT SCAN ({slow} ports over time)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": desc, "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None}
-                emit_alert(alert, f"{desc} {src} -> {dst}", window_time)
+                pending.append((alert, f"{desc} {src} -> {dst}"))
             dscan = check_dest_scan(dst, dport, window_time)
             if dscan is not None:
                 desc = f"DISTRIBUTED SCAN ({dscan} ports on target)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": desc, "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None}
-                emit_alert(alert, f"DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}", window_time)
+                pending.append((alert, f"DISTRIBUTED SCAN ({dscan} ports on target, multiple sources) -> {dst}"))
         if is_attack:
             pair = (src, dst)
             campaigns[pair]["ports"].add(dport)
@@ -438,7 +474,7 @@ def analyze_window(packets):
         if confidence is not None:
             confidence_text = f" conf={confidence:.2f}"
         alert = {"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence}
-        emit_alert(alert, f"{desc} {src} -> {dst} (model: {main_verdict}{confidence_text})", window_time)
+        pending.append((alert, f"{desc} {src} -> {dst} (model: {main_verdict}{confidence_text})"))
     for triple, count in trackers.slowloris_candidates(flow_list):
         last_seen = slowloris_last_seen.get(triple)
         slowloris_last_seen[triple] = window_time
@@ -453,7 +489,7 @@ def analyze_window(packets):
             timestamp = datetime.now().isoformat()
             desc = f"SLOWLORIS ({count} slow connections on port {port})"
             alert = {"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None}
-            emit_alert(alert, f"{desc} {host_a} <-> {host_b}", window_time)
+            pending.append((alert, f"{desc} {host_a} <-> {host_b}"))
 
 def run_live():
     global INTERFACE
