@@ -4,8 +4,11 @@ import sys
 from datetime import datetime
 from scapy.utils import PcapReader
 import live_ids
+import pandas as pd
 
 PROGRESS_EVERY_WINDOWS = 120
+HOLDOUT_TIME_COLUMN = "window_time"
+MISSING_CSV_PATH = "no_real_traffic_flows_on_purpose.csv"
 
 def parse_after_argument(argv):
     if "--after" not in argv:
@@ -16,6 +19,21 @@ def parse_after_argument(argv):
         print("Usage: ... soak_replay.py capture.pcapng log.jsonl [--after EPOCH]")
         sys.exit(1)
     return float(argv[value_index])
+
+def parse_after_csv_argument(argv):
+    if "--after-csv" not in argv:
+        return None
+    flag_index = argv.index("--after-csv")
+    value_index = flag_index + 1
+    if value_index >= len(argv):
+        print("Usage: ... soak_replay.py capture.pcapng log.jsonl [--after-csv holdout.csv]")
+        sys.exit(1)
+    csv_path = argv[value_index]
+    frame = pd.read_csv(csv_path)
+    return float(frame[HOLDOUT_TIME_COLUMN].min())
+
+def wants_lab_only(argv):
+    return "--lab-only" in argv
 
 def to_iso(timestamp):
     return datetime.fromtimestamp(timestamp).isoformat()
@@ -37,6 +55,11 @@ def main():
     capture_path = sys.argv[1]
     log_path = sys.argv[2]
     after_time = parse_after_argument(sys.argv)
+    if after_time is None:
+        after_time = parse_after_csv_argument(sys.argv)
+    if wants_lab_only(sys.argv):
+        live_ids.NORMAL_FLOWS_CSV = MISSING_CSV_PATH
+        print("Lab-only anomaly model (real-traffic flows ignored)")
     live_ids.load_models()
     live_ids.reset_live_state()
     if os.path.exists(log_path):
