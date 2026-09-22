@@ -35,6 +35,26 @@ EXTRA_CASES = [
     ("ack_scan.pcap", "ack_scan"),
 ]
 EXTRA_NORMAL_CASES = ["dns_normal.pcap"]
+GENERIC_RECON_KINDS = ["slow_scan", "distributed_scan"]
+SCAN_KINDS = ["port_scan", "udp_scan", "stealth_scan", "ack_scan", "fragmented_scan"]
+
+def acceptable_kinds(expected_kind):
+    acceptable = set()
+    acceptable.add(expected_kind)
+    if expected_kind in SCAN_KINDS:
+        for kind in GENERIC_RECON_KINDS:
+            acceptable.add(kind)
+    return acceptable
+
+def wrong_kinds(kind_counts, expected_kind):
+    wrong = Counter()
+    if expected_kind is None:
+        return wrong
+    allowed = acceptable_kinds(expected_kind)
+    for kind in kind_counts:
+        if kind not in allowed:
+            wrong[kind] = kind_counts[kind]
+    return wrong
 
 def build_cases():
     attack_cases = []
@@ -104,6 +124,7 @@ def evaluate_attack(case, log_path):
         "notified": 0,
         "shown_kinds": Counter(),
         "correct_shown": False,
+        "wrong_kinds": Counter(),
     }
     if not os.path.exists(case["path"]):
         result["status"] = "missing"
@@ -124,6 +145,7 @@ def evaluate_attack(case, log_path):
         shown_expected = result["shown_kinds"][case["expected"]]
         if shown_expected > 0:
             result["correct_shown"] = True
+    result["wrong_kinds"] = wrong_kinds(result["kinds"], case["expected"])
     return result
 
 def evaluate_normal(capture_path, log_path):
@@ -161,6 +183,18 @@ def summarize_noise(results):
         totals["logged"] = totals["logged"] + result["logged"]
         totals["notified"] = totals["notified"] + result["notified"]
     return totals
+
+def summarize_wrong(results):
+    summary = {"checkable": 0, "with_wrong": 0}
+    for result in results:
+        if result["status"] != "ok":
+            continue
+        if result["expected"] is None:
+            continue
+        summary["checkable"] = summary["checkable"] + 1
+        if len(result["wrong_kinds"]) > 0:
+            summary["with_wrong"] = summary["with_wrong"] + 1
+    return summary
 
 def summarize_shown(results):
     summary = {"checkable": 0, "shown": 0}
@@ -217,7 +251,7 @@ def attack_row(result):
     if expected_text is None:
         expected_text = "?"
     if result["status"] == "missing":
-        return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | missing | missing | - | - | - | - | - |")
+        return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | missing | missing | - | - | - | - | - | - |")
     detected_text = yes_no(result["detected"])
     if result["expected"] is None:
         correct_text = "?"
@@ -229,7 +263,8 @@ def attack_row(result):
     notified_text = str(result["notified"])
     shown_kinds_text = format_kinds(result["shown_kinds"])
     kinds_text = format_kinds(result["kinds"])
-    return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | " + detected_text + " | " + correct_text + " | " + shown_text + " | " + logged_text + " | " + notified_text + " | " + shown_kinds_text + " | " + kinds_text + " |")
+    wrong_text = format_kinds(result["wrong_kinds"])
+    return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | " + detected_text + " | " + correct_text + " | " + shown_text + " | " + wrong_text + " | " + logged_text + " | " + notified_text + " | " + shown_kinds_text + " | " + kinds_text + " |")
 
 def normal_row(result):
     if result["status"] == "missing":
@@ -260,6 +295,7 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("> *Logged* = alerts written to the log (evidence, used by incidents.py).")
     lines.append("> *Notified* = alerts shown to the human (one per source/destination/family per cooldown).")
     lines.append("> *Label shown* = the expected label appears in the console, not only in the log.")
+    lines.append("> *Wrong in log* = logged labels that do not describe the capture (end up in incidents).")
     lines.append("")
     unseen = summarize_attacks(attack_results, False)
     seen = summarize_attacks(attack_results, True)
@@ -271,6 +307,8 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("- **Attack alerts**: " + str(noise["logged"]) + " logged, " + str(noise["notified"]) + " notified (cooldown " + str(live_ids.ALERT_COOLDOWN_SECONDS) + " s per source/destination/family)")
     shown = summarize_shown(attack_results)
     lines.append("- **Expected label shown to the human**: " + str(shown["shown"]) + "/" + str(shown["checkable"]) + " attack captures")
+    wrong = summarize_wrong(attack_results)
+    lines.append("- **Attack captures with wrong labels in log**: " + str(wrong["with_wrong"]) + "/" + str(wrong["checkable"]))
     normal_total = 0
     normal_with_alerts = 0
     normal_alert_count = 0
@@ -285,8 +323,8 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("")
     lines.append("## Attack captures")
     lines.append("")
-    lines.append("| Capture | Expected | In training | Detected | Correct label | Label shown | Logged | Notified | Shown kinds | Alert kinds |")
-    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    lines.append("| Capture | Expected | In training | Detected | Correct label | Label shown | Wrong in log | Logged | Notified | Shown kinds | Alert kinds |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
     for result in attack_results:
         lines.append(attack_row(result))
     lines.append("")
