@@ -234,10 +234,11 @@ def load_extra_normal_flows(csv_path):
 def load_models():
     global classifier, clf_features, classifier_v2, clf_features_v2
     global anomaly_model, anomaly_features
-    require_file("my_model.joblib", "The base model. Build with build_my_dataset.py + train_mine.py.")
-    saved = joblib.load("my_model.joblib")
-    classifier = saved["model"]
-    clf_features = saved["features"]
+    if not USE_V2:
+        require_file("my_model.joblib", "The base model. Build with build_my_dataset.py + train_mine.py.")
+        saved = joblib.load("my_model.joblib")
+        classifier = saved["model"]
+        clf_features = saved["features"]
     if USE_V2:
         require_file(V2_MODEL_PATH, "The v2 model. Build with build_dataset_v2.py + train_v2.py D.")
         saved_v2 = joblib.load(V2_MODEL_PATH)

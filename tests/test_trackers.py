@@ -1,6 +1,7 @@
 from scapy.all import IP, TCP, ICMP, Ether
 import trackers
 from trackers import counts_as_scan_probe, is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS, held_open_connections, persistent_connections, SLOWLORIS_MIN_PERSISTENT
+from live_ids import slowloris_triple
 
 FROM_SCANNER = True
 FROM_TARGET = False
@@ -13,6 +14,11 @@ CLIENT_PORT = 46000
 SERVER_TRIPLE = ("10.0.0.5", "192.168.1.1", 80)
 FEW_PACKETS = 4
 MANY_PACKETS = 50
+CLIENT_IP = "192.168.1.244"
+SERVER_IP = "192.168.1.1"
+SERVER_PORT = 80
+CLIENT_PORT = 51234
+TCP_PROTO = "TCP"
 
 def build(packet):
     return Ether(bytes(packet))
@@ -259,3 +265,9 @@ def test_new_connections_every_window_are_not_persistent():
     current = {"n1", "n2", "n3"}
     previous = {"o1", "o2", "o3"}
     assert persistent_connections(current, previous) == set()
+
+def test_triple_is_the_same_in_both_directions():
+    outgoing = (CLIENT_IP, SERVER_IP, CLIENT_PORT, SERVER_PORT, TCP_PROTO)
+    incoming = (SERVER_IP, CLIENT_IP, SERVER_PORT, CLIENT_PORT, TCP_PROTO)
+    assert slowloris_triple(outgoing) == slowloris_triple(incoming)
+    assert slowloris_triple(outgoing)[2] == SERVER_PORT
