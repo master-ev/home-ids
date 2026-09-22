@@ -8,3 +8,5 @@ dashboard.html
 sample_alerts.jsonl
 .pytest_cache/
 my_dataset_v2.csv
+soak_*.jsonl
+soak_*.session.json

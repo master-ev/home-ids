@@ -47,6 +47,8 @@ slowloris_windows = defaultdict(int)
 slowloris_alerted = set()
 conf.use_pcap = True
 WINDOW_SECONDS = 5
+SESSION_SUFFIX = ".session.json"
+SESSION_SAVE_EVERY_WINDOWS = 60
 ALERT_LOG = "alerts.jsonl"
 NORMAL_LABEL = "normal"
 ANOMALY_VERDICT = "anomaly"
@@ -542,18 +544,55 @@ def collect_window_alerts(packets, window_time, pending):
             alert = {"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": count, "num_ports": 1, "model_verdict": "slowloris", "confidence": None}
             pending.append((alert, f"{desc} {host_a} <-> {host_b}"))
 
-def run_live():
-    global INTERFACE
+def parse_log_argument(argv):
+    if "--log" not in argv:
+        return None
+    flag_index = argv.index("--log")
+    value_index = flag_index + 1
+    if value_index >= len(argv):
+        print("Usage: sudo venv/bin/python live_ids.py [--log soak_alerts.jsonl]")
+        sys.exit(1)
+    return argv[value_index]
+
+def write_session(session_path, session):
+    with open(session_path, "w") as f:
+        json.dump(session, f, indent=2)
+
+def run_live(log_path):
+    global INTERFACE, ALERT_LOG
     INTERFACE = active_interface(ROUTER_IP)
     print(f"Auto-detected interface: {INTERFACE}")
     load_models()
+    session = None
+    session_path = None
+    if log_path is not None:
+        ALERT_LOG = log_path
+        session_path = log_path + SESSION_SUFFIX
+        start_text = datetime.now().isoformat()
+        session = {"start": start_text, "last_update": start_text, "end": None, "windows": 0, "packets": 0, "interface": INTERFACE}
+        write_session(session_path, session)
+        print(f"Soak session: alerts -> {log_path}, session -> {session_path}")
     print(f"Live IDS running on {INTERFACE}, {WINDOW_SECONDS}s windows, " f"notification cooldown {ALERT_COOLDOWN_SECONDS}s per family\n")
     try:
         while True:
             packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp or icmp")
             analyze_window(packets)
+            if session is not None:
+                session["windows"] = session["windows"] + 1
+                session["packets"] = session["packets"] + len(packets)
+                is_save_time = session["windows"] % SESSION_SAVE_EVERY_WINDOWS == 0
+                if is_save_time:
+                    session["last_update"] = datetime.now().isoformat()
+                    write_session(session_path, session)
     except KeyboardInterrupt:
         print("\nStopped")
+        if session is not None:
+            end_text = datetime.now().isoformat()
+            session["last_update"] = end_text
+            session["end"] = end_text
+            write_session(session_path, session)
+            print(f"Session saved: {session['windows']} windows, {session['packets']} packets")
 
 if __name__ == "__main__":
-    run_live()
+    log_argument = parse_log_argument(sys.argv)
+    run_live(log_argument)
