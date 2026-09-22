@@ -37,6 +37,26 @@ The ML model does the per-flow discrimination; rules handle what is a matter of
 persistence or raw volume. Raw alerts are aggregated → correlated into incidents
 → grouped into campaigns → prioritised by severity **and** model confidence.
 
+### Layer 3: anomaly detection - measured, not assumed
+
+The anomaly layer is meant to catch what the other two layers have never seen.
+Measured on real traffic and on unseen attacks (days 73-74):
+
+| | soak holdout (real normal traffic) | ack_scan | stealth_sX |
+|---|---|---|---|
+| lab captures only, c=0.05 | 89.2% flows flagged | 0% | 0% |
+| + real-traffic flows, c=0.05 | 2.6% | 0% | 0% |
+
+Two findings, both uncomfortable and both kept here on purpose:
+- trained on lab captures only, it flagged nearly ALL real normal traffic
+  (28.6 false notices/h in the first valid soak test)
+- on the two genuinely unseen attacks it flagged nothing, before or after: what
+  caught them were the deterministic trackers, not the anomaly layer
+
+It is kept as a net for the unknown, at a contamination level diagnosed against
+a held-out half of real traffic, and its detection value is documented as
+UNPROVEN rather than claimed.
+
 ## Temporal attacks belong to trackers, not the model
 
 A pattern emerged across the project: some attacks have no signature *inside* a
