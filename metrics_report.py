@@ -80,6 +80,15 @@ def count_notified(alerts):
             notified = notified + 1
     return notified
 
+def count_shown_kinds(alerts):
+    shown = Counter()
+    for alert in alerts:
+        is_notified = alert.get("notified", True)
+        if is_notified:
+            kind = alert["kind"]
+            shown[kind] = shown[kind] + 1
+    return shown
+
 def evaluate_attack(case, log_path):
     result = {
         "path": case["path"],
@@ -92,6 +101,8 @@ def evaluate_attack(case, log_path):
         "kinds": Counter(),
         "logged": 0,
         "notified": 0,
+        "shown_kinds": Counter(),
+        "correct_shown": False,
     }
     if not os.path.exists(case["path"]):
         result["status"] = "missing"
@@ -107,6 +118,11 @@ def evaluate_attack(case, log_path):
         expected_count = result["kinds"][case["expected"]]
         if expected_count > 0:
             result["correct"] = True
+    result["shown_kinds"] = count_shown_kinds(alerts)
+    if case["expected"] is not None:
+        shown_expected = result["shown_kinds"][case["expected"]]
+        if shown_expected > 0:
+            result["correct_shown"] = True
     return result
 
 def evaluate_normal(capture_path, log_path):
@@ -144,6 +160,18 @@ def summarize_noise(results):
         totals["logged"] = totals["logged"] + result["logged"]
         totals["notified"] = totals["notified"] + result["notified"]
     return totals
+
+def summarize_shown(results):
+    summary = {"checkable": 0, "shown": 0}
+    for result in results:
+        if result["status"] != "ok":
+            continue
+        if result["expected"] is None:
+            continue
+        summary["checkable"] = summary["checkable"] + 1
+        if result["correct_shown"]:
+            summary["shown"] = summary["shown"] + 1
+    return summary
 
 def run_command_tail(command, line_count):
     completed = subprocess.run(command, capture_output=True, text=True)
@@ -188,16 +216,19 @@ def attack_row(result):
     if expected_text is None:
         expected_text = "?"
     if result["status"] == "missing":
-        return "| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | missing | missing | - | - | - |"
+        return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | missing | missing | - | - | - | - | - |")
     detected_text = yes_no(result["detected"])
     if result["expected"] is None:
         correct_text = "?"
+        shown_text = "?"
     else:
         correct_text = yes_no(result["correct"])
+        shown_text = yes_no(result["correct_shown"])
     logged_text = str(result["logged"])
     notified_text = str(result["notified"])
+    shown_kinds_text = format_kinds(result["shown_kinds"])
     kinds_text = format_kinds(result["kinds"])
-    return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | " + detected_text + " | " + correct_text + " | " + logged_text + " | " + notified_text + " | " + kinds_text + " |")
+    return ("| " + result["path"] + " | " + expected_text + " | " + in_training_text + " | " + detected_text + " | " + correct_text + " | " + shown_text + " | " + logged_text + " | " + notified_text + " | " + shown_kinds_text + " | " + kinds_text + " |")
 
 def normal_row(result):
     if result["status"] == "missing":
@@ -227,6 +258,7 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("> the pipeline, not generalization. Model generalization = LOCO (below).")
     lines.append("> *Logged* = alerts written to the log (evidence, used by incidents.py).")
     lines.append("> *Notified* = alerts shown to the human (one per source/destination/family per cooldown).")
+    lines.append("> *Label shown* = the expected label appears in the console, not only in the log.")
     lines.append("")
     unseen = summarize_attacks(attack_results, False)
     seen = summarize_attacks(attack_results, True)
@@ -236,6 +268,8 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append(summary_line("Unseen attack captures", unseen))
     lines.append(summary_line("In-training attack captures", seen))
     lines.append("- **Attack alerts**: " + str(noise["logged"]) + " logged, " + str(noise["notified"]) + " notified (cooldown " + str(live_ids.ALERT_COOLDOWN_SECONDS) + " s per source/destination/family)")
+    shown = summarize_shown(attack_results)
+    lines.append("- **Expected label shown to the human**: " + str(shown["shown"]) + "/" + str(shown["checkable"]) + " attack captures")
     normal_total = 0
     normal_with_alerts = 0
     normal_alert_count = 0
@@ -250,8 +284,8 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
     lines.append("")
     lines.append("## Attack captures")
     lines.append("")
-    lines.append("| Capture | Expected | In training | Detected | Correct label | Logged | Notified | Alert kinds |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("| Capture | Expected | In training | Detected | Correct label | Label shown | Logged | Notified | Shown kinds | Alert kinds |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for result in attack_results:
         lines.append(attack_row(result))
     lines.append("")
