@@ -1,6 +1,7 @@
 import pytest
 import live_ids
-from live_ids import specificity_of, flush_window_alerts, SPECIFICITY_GENERIC, SPECIFICITY_SPECIFIC, cooldown_allows, emit_alert, ALERT_COOLDOWN_SECONDS
+import live_ids
+from alert_policy import (specificity_of, flush_window_alerts, family_of, cooldown_allows, emit_alert, ALERT_COOLDOWN_SECONDS, SPECIFICITY_GENERIC, SPECIFICITY_SPECIFIC)
 from replay import read_logged_alerts
 
 START_TIME = 1000.0
@@ -43,35 +44,31 @@ def test_repeats_are_logged_but_notified_once(throttle_log):
     repeat_count = 3
     for index in range(repeat_count):
         now = START_TIME + index * SMALL_STEP
-        emit_alert(make_alert("port_scan", ATTACKER), "test", now)
+        emit_alert(make_alert("port_scan", ATTACKER), "test", now, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert len(alerts) == repeat_count
     assert count_notified(alerts) == 1
 
-
 def test_next_notice_reports_suppressed_repeats(throttle_log):
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + 2 * SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME + 2 * SMALL_STEP, live_ids.log_alert)
     after_cooldown = START_TIME + ALERT_COOLDOWN_SECONDS
-    emit_alert(make_alert("port_scan", ATTACKER), "test", after_cooldown)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", after_cooldown, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     last = alerts[-1]
     assert last["notified"] is True
     assert last["suppressed_repeats"] == 2
 
 def test_new_kind_or_new_source_is_notified_immediately(throttle_log):
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("brute_force", ATTACKER), "test", START_TIME + SMALL_STEP)
-    emit_alert(make_alert("port_scan", OTHER_ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("brute_force", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
+    emit_alert(make_alert("port_scan", OTHER_ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 3
 
-from live_ids import family_of
-
 UNMAPPED_KIND_A = "future_tracker_a"
 UNMAPPED_KIND_B = "future_tracker_b"
-
 
 def test_family_of_known_kinds_and_fail_safe_for_unknown():
     assert family_of("port_scan") == "recon"
@@ -79,31 +76,30 @@ def test_family_of_known_kinds_and_fail_safe_for_unknown():
     assert family_of("stealth_scan") == "evasion"
     assert family_of(UNMAPPED_KIND_A) == UNMAPPED_KIND_A
 
-
 def test_evasion_after_recon_is_notified(throttle_log):
-    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("stealth_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("stealth_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 2
 
 
 def test_recon_after_evasion_is_covered(throttle_log):
-    emit_alert(make_alert("stealth_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("stealth_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 1
 
 
 def test_flood_after_recon_is_notified(throttle_log):
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("dos", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("dos", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 2
 
 
 def test_unknown_kinds_never_merge(throttle_log):
-    emit_alert(make_alert(UNMAPPED_KIND_A, ATTACKER), "test", START_TIME)
-    emit_alert(make_alert(UNMAPPED_KIND_B, ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert(UNMAPPED_KIND_A, ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert(UNMAPPED_KIND_B, ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 2
 
@@ -120,45 +116,45 @@ def test_specificity_of_generic_specific_and_unknown():
     assert specificity_of(UNMAPPED_KIND_A) == SPECIFICITY_SPECIFIC
 
 def test_specific_after_generic_is_an_upgrade(throttle_log):
-    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("udp_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("udp_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 2
     assert alerts[1]["upgrade"] is True
 
 def test_generic_after_specific_is_suppressed(throttle_log):
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 1
 
 def test_same_specificity_is_not_an_upgrade(throttle_log):
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("udp_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("udp_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 1
 
 def test_window_flush_shows_most_specific_first(throttle_log):
     pending = [(make_alert("slow_scan", ATTACKER), "test"), (make_alert("udp_scan", ATTACKER), "test"),]
-    flush_window_alerts(pending, START_TIME)
+    flush_window_alerts(pending, START_TIME, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert len(alerts) == 2
     assert notified_kinds(alerts) == {"udp_scan"}
 
 def test_same_family_detectors_notified_once(throttle_log):
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert len(alerts) == 2
     assert count_notified(alerts) == 1
 
 
 def test_next_notice_lists_silent_detectors(throttle_log):
-    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME)
-    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP)
-    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + 2 * SMALL_STEP)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
+    emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + 2 * SMALL_STEP, live_ids.log_alert)
     after_cooldown = START_TIME + ALERT_COOLDOWN_SECONDS
-    emit_alert(make_alert("port_scan", ATTACKER), "test", after_cooldown)
+    emit_alert(make_alert("port_scan", ATTACKER), "test", after_cooldown, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     last = alerts[-1]
     assert last["notified"] is True

@@ -5,7 +5,7 @@ from scapy.all import rdpcap
 import live_ids
 from incidents import load_alerts, compute_severity, SEVERITY_MEDIUM
 from replay import split_into_windows, read_logged_alerts, replay_to_log
-from live_ids import family_of, families_that_block
+from alert_policy import family_of, families_that_block
 
 STEALTH_CAPTURE = "stealth_sX.pcap"
 FRAGMENT_CAPTURE = "frag_scan.pcap"

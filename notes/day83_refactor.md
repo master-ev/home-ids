@@ -22,3 +22,17 @@ an externally-patched module global deserves its own day.
 ## Lesson
 Pure functions move cleanly; state does not. Before moving state, grep for every
 reference and expect the reset path and the tests to need updating too.
+
+## Day 84: alert_policy.py
+
+Moved: families, specificity, cooldown, episodes, emit_alert, flush_window_alerts.
+
+ALERT_LOG stayed in live_ids.py. Moving it would have meant updating 12 references
+in 5 files, including three that reassign it from outside (replay.py,
+soak_replay.py, two fixtures) - and a missed one would silently write to the real
+alerts.jsonl while the tests still passed.
+Instead emit_alert takes the log function as a parameter: no external reference
+changes, and the policy module now has no I/O dependency of its own.
+
+live_ids.py: 683 -> 611 -> <FILL IN> lines.
+Coverage per module: <FILL IN>

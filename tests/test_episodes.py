@@ -1,6 +1,6 @@
 import pytest
 import live_ids
-from live_ids import episode_starts, FRAGMENT_EPISODE_GAP_SECONDS
+from alert_policy import episode_starts, FRAGMENT_EPISODE_GAP_SECONDS
 from flow_state import check_slow_scan, check_dest_scan, SLOW_SCAN_THRESHOLD, DEST_SCAN_THRESHOLD
 
 START_TIME = 1000.0

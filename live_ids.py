@@ -5,6 +5,8 @@ import trackers
 import os
 import sys
 import flow_state
+import alert_policy
+from alert_policy import (episode_starts, ALERT_COOLDOWN_SECONDS, FRAGMENT_EPISODE_GAP_SECONDS, SLOWLORIS_EPISODE_GAP_SECONDS)
 from scapy.all import sniff, conf, IP, rdpcap, TCP
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -13,10 +15,9 @@ from features import get_ips_ports, flow_key, compute_rich_features
 from context import CONTEXT_FEATURES, compute_context
 from feature_sets import clean_features
 from net_iface import active_interface, ROUTER_IP
-from trackers import detect_stealth_scans
-from scenarios import CAPTURES
 from trackers import detect_stealth_scans, detect_ack_scans, is_lone_ack_probe
-from labels import (choose_campaign_label, flows_per_port, ANOMALY_VERDICT, SCAN_MIN_PORTS, MIN_ATTACK_FLOWS, FEW_PORTS_MAX, SUSPICIOUS_MIN_FLOWS, SCAN_VERDICT, DOS_VERDICT)
+from scenarios import CAPTURES
+from labels import choose_campaign_label, ANOMALY_VERDICT
 
 def require_file(path, hint):
     if not os.path.exists(path):
@@ -47,36 +48,7 @@ NORMAL_FLOWS_CSV = "soak_normal_train.csv"
 FLOW_METADATA_COLUMNS = ["window_time", "is_ipv6"]
 ANOMALY_CONTAMINATION = 0.05
 ANOMALY_RANDOM_SEED = 42
-ALERT_COOLDOWN_SECONDS = 60
-last_notified_time = {}
-last_notified_specificity = {}
-unsure_verdicts = {}
-suppressed_kinds = defaultdict(Counter)
-KIND_FAMILY = {
-    "port_scan": "recon",
-    "slow_scan": "recon",
-    "distributed_scan": "recon",
-    "udp_scan": "recon",
-    "stealth_scan": "evasion",
-    "fragmented_scan": "evasion",
-    "ack_scan": "evasion",
-    "brute_force": "access",
-    "dos": "flood",
-    "syn_flood": "flood",
-    "icmp_flood": "flood",
-    "slowloris": "flood",
-    "anomaly": "anomaly",
-    "suspicious": "unclassified",
-}
-FAMILY_COVERS = {
-    "evasion": ["recon"],
-}
 HEADER_WORD_BYTES = 4
-SPECIFICITY_GENERIC = 1
-SPECIFICITY_SPECIFIC = 2
-GENERIC_KINDS = ["slow_scan", "distributed_scan", "suspicious"]
-FRAGMENT_EPISODE_GAP_SECONDS = 60
-SLOWLORIS_EPISODE_GAP_SECONDS = 60
 frag_last_seen = {}
 slowloris_last_seen = {}
 slowloris_previous_conns = {}
@@ -263,132 +235,6 @@ def log_alert(alert):
     with open(ALERT_LOG, "a") as f:
         f.write(json.dumps(alert) + "\n")
 
-def cooldown_allows(last_time, now, cooldown_seconds):
-    if last_time is None:
-        return True
-    elapsed = now - last_time
-    if elapsed >= cooldown_seconds:
-        return True
-    return False
-
-def family_of(kind):
-    family = KIND_FAMILY.get(kind)
-    if family is None:
-        return kind
-    return family
-
-def families_that_block(family):
-    blocking = [family]
-    for covering_family, covered_list in FAMILY_COVERS.items():
-        if family in covered_list:
-            blocking.append(covering_family)
-    return blocking
-
-def specificity_of(kind):
-    if kind in GENERIC_KINDS:
-        return SPECIFICITY_GENERIC
-    return SPECIFICITY_SPECIFIC
-
-def format_suppressed(kind_counts):
-    parts = []
-    for kind in sorted(kind_counts):
-        count = kind_counts[kind]
-        parts.append(kind + " x" + str(count))
-    return ", ".join(parts)
-
-def unsure_context(src, dst):
-    entry = unsure_verdicts.get((src, dst))
-    if entry is None:
-        return "", None
-    verdict, confidence = entry
-    text = f" [model unsure: {verdict} {confidence:.2f}]"
-    field = {"verdict": verdict, "confidence": confidence}
-    return text, field
-
-def episode_starts(last_seen, now, gap_seconds):
-    if last_seen is None:
-        return True
-    pause = now - last_seen
-    if pause > gap_seconds:
-        return True
-    return False
-
-def emit_alert(alert, console_text, window_time):
-    source = alert["source"]
-    destination = alert["destination"]
-    kind = alert["kind"]
-    family = family_of(kind)
-    specificity = specificity_of(kind)
-    alert["family"] = family
-    blocking_key = None
-    is_upgrade = False
-    for candidate_family in families_that_block(family):
-        candidate_key = (source, destination, candidate_family)
-        last_time = last_notified_time.get(candidate_key)
-        if cooldown_allows(last_time, window_time, ALERT_COOLDOWN_SECONDS):
-            continue
-        shown_specificity = last_notified_specificity.get(candidate_key, SPECIFICITY_GENERIC)
-        if specificity > shown_specificity:
-            is_upgrade = True
-            continue
-        blocking_key = candidate_key
-        break
-    if blocking_key is None:
-        own_key = (source, destination, family)
-        silent_kinds = suppressed_kinds[own_key]
-        repeats = 0
-        for silent_kind in silent_kinds:
-            repeats = repeats + silent_kinds[silent_kind]
-        repeat_text = ""
-        if repeats > 0:
-            repeat_text = f" (+{repeats} similar since last notice: {format_suppressed(silent_kinds)})"
-        upgrade_text = ""
-        if is_upgrade:
-            upgrade_text = " [more specific than the earlier notice]"
-        alert["notified"] = True
-        alert["upgrade"] = is_upgrade
-        alert["suppressed_repeats"] = repeats
-        alert["suppressed_kinds"] = dict(silent_kinds)
-        suppressed_kinds[own_key] = Counter()
-        last_notified_time[own_key] = window_time
-        last_notified_specificity[own_key] = specificity
-        now_str = datetime.now().strftime("%H:%M:%S")
-        print(f"[{now_str}] ALERT: {console_text}{upgrade_text}{repeat_text}")
-        notify = True
-    else:
-        suppressed_kinds[blocking_key][kind] = suppressed_kinds[blocking_key][kind] + 1
-        alert["notified"] = False
-        notify = False
-    log_alert(alert)
-    return notify
-
-def pending_specificity(item):
-    alert = item[0]
-    return specificity_of(alert["kind"])
-
-def flush_window_alerts(pending, window_time):
-    ordered = sorted(pending, key=pending_specificity, reverse=True)
-    for alert, console_text in ordered:
-        if alert["confidence"] is None:
-            suffix, field = unsure_context(alert["source"], alert["destination"])
-            if field is not None:
-                alert["model_unsure"] = field
-                console_text = console_text + suffix
-        emit_alert(alert, console_text, window_time)
-
-def reset_live_state():
-    flow_state.reset_scan_state()
-    slowloris_windows.clear()
-    slowloris_windows.clear()
-    slowloris_alerted.clear()
-    frag_last_seen.clear()
-    slowloris_last_seen.clear()
-    slowloris_previous_conns.clear()
-    last_notified_time.clear()
-    last_notified_specificity.clear()
-    unsure_verdicts.clear()
-    suppressed_kinds.clear()
-
 def report_stealth_scans(packets, pending):
     stealth_input = extract_tcp_info(packets)
     stealth_alerts = detect_stealth_scans(stealth_input)
@@ -416,7 +262,16 @@ def analyze_window(packets):
     window_time = float(packets[0].time)
     pending = []
     collect_window_alerts(packets, window_time, pending)
-    flush_window_alerts(pending, window_time)
+    alert_policy.flush_window_alerts(pending, window_time, log_alert)
+
+def reset_live_state():
+    flow_state.reset_scan_state()
+    alert_policy.reset_policy_state()
+    slowloris_windows.clear()
+    slowloris_alerted.clear()
+    frag_last_seen.clear()
+    slowloris_last_seen.clear()
+    slowloris_previous_conns.clear()
 
 def collect_window_alerts(packets, window_time, pending):
     for src, dst, count in trackers.fragment_alerts(packets):
@@ -516,7 +371,7 @@ def collect_window_alerts(packets, window_time, pending):
             continue
         confidence = average_confidence(data["confidences"])
         if confidence is not None and confidence < MODEL_ALERT_MIN_CONFIDENCE:
-            unsure_verdicts[(src, dst)] = (main_verdict, confidence)
+            alert_policy.unsure_verdicts[(src, dst)] = (main_verdict, confidence)
             continue
         timestamp = datetime.now().isoformat()
         confidence_text = ""
