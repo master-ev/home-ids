@@ -262,3 +262,13 @@ def test_floods_are_not_labelled_slowloris(alert_log, capture):
     replay_capture(capture)
     alerts = read_logged_alerts(alert_log)
     assert alerts_of_kind(alerts, "slowloris") == []
+
+SRCPORT_SCAN_CAPTURE = "srcport_scan.pcap"
+
+
+def test_source_port_scan_is_detected_and_labelled(alert_log):
+    require_capture(SRCPORT_SCAN_CAPTURE)
+    replay_capture(SRCPORT_SCAN_CAPTURE)
+    alerts = read_logged_alerts(alert_log)
+    assert len(alerts_of_kind(alerts, "port_scan")) >= 1
+    assert "port_scan" in notified_kinds_in(alerts)

@@ -271,3 +271,10 @@ def test_triple_is_the_same_in_both_directions():
     incoming = (SERVER_IP, CLIENT_IP, SERVER_PORT, CLIENT_PORT, TCP_PROTO)
     assert slowloris_triple(outgoing) == slowloris_triple(incoming)
     assert slowloris_triple(outgoing)[2] == SERVER_PORT
+
+PRIVILEGED_SOURCE_PORT = 53
+HIGH_TARGET_PORT = 8080
+
+def test_triple_picks_the_lower_port_even_when_it_is_the_source():
+    spoofed = ("192.168.1.236", "192.168.1.1", PRIVILEGED_SOURCE_PORT, HIGH_TARGET_PORT, TCP_PROTO)
+    assert slowloris_triple(spoofed)[2] == PRIVILEGED_SOURCE_PORT
