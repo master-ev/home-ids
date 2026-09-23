@@ -10,7 +10,13 @@ TOP_SOURCES_LIMIT = 5
 RAW_ALERTS_LIMIT = 50
 FULL_WIDTH_PERCENT = 100
 NO_REFRESH = 0
-DEFAULT_WATCH_SECONDS = 10 
+DEFAULT_WATCH_SECONDS = 10
+SOURCE_TRACKER = "tracker"
+SOURCE_MODEL = "model"
+SOURCE_ANOMALY = "anomaly"
+SOURCE_MIXED = "mixed"
+ANOMALY_VERDICT = "anomaly"
+
 
 CSS = """
 :root {
@@ -323,6 +329,44 @@ def generate_once(path, refresh_seconds):
     file.close()
     return len(alerts), len(incident_list), len(campaign_list)
 
+def alert_source(alert):
+    if alert.get("model_verdict") == ANOMALY_VERDICT:
+        return SOURCE_ANOMALY
+    if alert.get("confidence") is None:
+        return SOURCE_TRACKER
+    return SOURCE_MODEL
+
+def incident_source(alerts):
+    sources = set()
+    for alert in alerts:
+        sources.add(alert_source(alert))
+    if len(sources) == 1:
+        return sources.pop()
+    return SOURCE_MIXED
+
+def model_was_unsure(alerts):
+    for alert in alerts:
+        if "model_unsure" in alert:
+            return True
+    return False
+
+def notified_count(alerts):
+    shown = 0
+    for alert in alerts:
+        if alert.get("notified", True):
+            shown = shown + 1
+    return shown
+
+def family_counts(alerts, family_of_kind):
+    counts = {}
+    for alert in alerts:
+        family = alert.get("family")
+        if family is None:
+            family = family_of_kind(alert["kind"])
+        if family not in counts:
+            counts[family] = 0
+        counts[family] = counts[family] + 1
+    return counts
 
 def main():
     path = DEFAULT_ALERTS_PATH
