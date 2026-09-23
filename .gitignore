@@ -15,3 +15,7 @@ loco_run*.txt
 soak_normal_*.csvdemo_alerts.jsonl
 demo_part.jsonl
 demo_alerts.jsonl.session.json
+.coverage
+demo_alerts.jsonl
+demo_part.jsonl
+soak_normal_*.csv
