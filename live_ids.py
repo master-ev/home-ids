@@ -64,6 +64,7 @@ ANOMALY_RANDOM_SEED = 42
 ALERT_COOLDOWN_SECONDS = 60
 last_notified_time = {}
 last_notified_specificity = {}
+unsure_verdicts = {}
 suppressed_kinds = defaultdict(Counter)
 KIND_FAMILY = {
     "port_scan": "recon",
@@ -309,6 +310,15 @@ def format_suppressed(kind_counts):
         parts.append(kind + " x" + str(count))
     return ", ".join(parts)
 
+def unsure_context(src, dst):
+    entry = unsure_verdicts.get((src, dst))
+    if entry is None:
+        return "", None
+    verdict, confidence = entry
+    text = f" [model unsure: {verdict} {confidence:.2f}]"
+    field = {"verdict": verdict, "confidence": confidence}
+    return text, field
+
 def episode_starts(last_seen, now, gap_seconds):
     if last_seen is None:
         return True
@@ -373,6 +383,11 @@ def pending_specificity(item):
 def flush_window_alerts(pending, window_time):
     ordered = sorted(pending, key=pending_specificity, reverse=True)
     for alert, console_text in ordered:
+        if alert["confidence"] is None:
+            suffix, field = unsure_context(alert["source"], alert["destination"])
+            if field is not None:
+                alert["model_unsure"] = field
+                console_text = console_text + suffix
         emit_alert(alert, console_text, window_time)
 
 def check_slow_scan(src, dst, dport, now):
@@ -412,6 +427,7 @@ def reset_live_state():
     slowloris_previous_conns.clear()
     last_notified_time.clear()
     last_notified_specificity.clear()
+    unsure_verdicts.clear()
     suppressed_kinds.clear()
 
 def report_stealth_scans(packets, pending):
@@ -572,6 +588,7 @@ def collect_window_alerts(packets, window_time, pending):
             continue
         confidence = average_confidence(data["confidences"])
         if confidence is not None and confidence < MODEL_ALERT_MIN_CONFIDENCE:
+            unsure_verdicts[(src, dst)] = (main_verdict, confidence)
             continue
         timestamp = datetime.now().isoformat()
         confidence_text = ""
