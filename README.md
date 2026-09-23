@@ -1,207 +1,191 @@
-# Home IDS — Machine-Learning Intrusion Detection for a Home Network
+# Home IDS
 
-A real-time intrusion detection system for my own home network. It captures live
-traffic, groups it into flows, and combines three complementary layers: a
-**Random Forest classifier** for per-flow attack types, deterministic **trackers**
-for temporal and volume patterns, and an **Isolation Forest** for anomalies.
-Detections are aggregated into incidents and campaigns, scored by severity and
-model confidence, and shown on a live dashboard.
+A network intrusion detection system for my own home network: three detection
+layers (Random Forest, deterministic trackers, anomaly detection), 9 attack types,
+5 evasion techniques tested, and - the part I care about most - every claim below
+measured against traffic the system had never seen.
 
-Everything is tested against my own infrastructure, with attacks I generate
-myself against my own target — no abstract benchmark data.
+**0 false notifications in 1.19 million packets of real home traffic.**
+**11/11 unseen attack captures detected.** 158 tests, 85% coverage.
 
-## What it detects
+![Dashboard](docs/dashboard.png)
 
-- **Port scans (TCP)**, including evasive variants: slow scans (timing), decoy
-  scans (`nmap -D`), distributed scans (many sources, one target), and both
-  connect (`-sT`) and SYN (`-sS`) scans
-- **UDP scans** (`nmap -sU`)
-- **DoS** (flood against my own server)
-- **Brute-force** (repeated login attempts)
-- **SYN flood** (half-open TCP flood)
-- **ICMP flood** (ping flood)
-- **Slowloris** (connection-exhaustion: many slow connections held open)
-- **Anomalies** — traffic that does not match learned normal behaviour
+## The story: 99.85% that meant nothing
 
-## How it works — three complementary layers
+The first model scored 99.85% on a random train/test split. In production it
+labelled a decoy scan as a DoS flood. Leave-One-Capture-Out evaluation - training
+on every capture except one, testing on that one - gave **0.1%** on the unseen
+scan.
 
-Security is layers, each covering the others' blind spots:
+Three causes, all found by diagnosing with data instead of guessing:
+- a shortcut: "no reply = attack", learned from captures where only attacks went
+  unanswered
+- a direction bug: flow direction decided on IP alone, not (IP, port)
+- missing diversity: the model had learned the fingerprint of each capture, not
+  the behaviour
 
-| Layer | Handles | Why |
+The fixes (context features, an explicit `is_tcp` feature, direction on (IP, port),
+diverse captures across sources, tools and protocols) took set D to a LOCO mean of
+~99%. Every number in this README is measured the same way: on captures the model
+never saw, replayed through the exact live pipeline.
+
+## Architecture
+
+Traffic is captured in 5-second windows and grouped into flows. Each window goes
+through three independent layers:
+
+| Layer | What it does | Where it fails |
 |---|---|---|
-| Random Forest classifier | scan, udp_scan, dos, bruteforce, syn_flood, normal | per-flow + per-window patterns the model learns well |
-| Deterministic trackers | slow scan, distributed scan, ICMP flood, Slowloris | temporal / volume patterns better caught by a rule |
-| Isolation Forest | unknown anomalies | what neither of the above was trained for |
+| **Random Forest** (feature set D, 43 features) | labels each flow: scan, udp_scan, dos, brute force, SYN flood | size-based features: a padded scan drops it to conf 0.34 |
+| **Deterministic trackers** | temporal and structural patterns the model cannot see in one window: slow scans, distributed scans, ICMP floods, Slowloris, fragmentation, NULL/FIN/XMAS flags, ACK probes | nothing that needs statistics |
+| **Anomaly detection** (IsolationForest) | flows unlike anything in the normal traffic it was trained on | see below |
 
-The ML model does the per-flow discrimination; rules handle what is a matter of
-persistence or raw volume. Raw alerts are aggregated → correlated into incidents
-→ grouped into campaigns → prioritised by severity **and** model confidence.
+Model alerts below 0.70 confidence are dropped: a model that is unsure must not
+put a label on something. Since day 79 the fact that it was unsure is attached to
+the tracker alerts of that window - low confidence plus firing trackers is itself
+an evasion signal.
 
-### Layer 3: anomaly detection - measured, not assumed
+Alerts are then aggregated: alerts → incidents (same source, type, time window) →
+campaigns (multi-source, multi-stage), with severity and aggregated confidence.
+The dashboard shows incidents and campaigns, never raw alerts.
 
-The anomaly layer is meant to catch what the other two layers have never seen.
-Measured on real traffic and on unseen attacks (days 73-74):
+### The third layer, measured
 
-| | soak holdout (real normal traffic) | ack_scan | stealth_sX |
+The anomaly layer is meant to catch what the other two have never seen. Measured
+on real traffic and on unseen attacks:
+
+| | real normal traffic (holdout) | ack_scan | stealth_sX |
 |---|---|---|---|
-| lab captures only, c=0.05 | 89.2% flows flagged | 0% | 0% |
-| + real-traffic flows, c=0.05 | 2.6% | 0% | 0% |
+| trained on lab captures only | **89.2%** of flows flagged | 0% | 0% |
+| + real-traffic flows | 2.6% | 0% | 0% |
 
-Two findings, both uncomfortable and both kept here on purpose:
-- trained on lab captures only, it flagged nearly ALL real normal traffic
-  (28.6 false notices/h in the first valid soak test)
-- on the two genuinely unseen attacks it flagged nothing, before or after: what
-  caught them were the deterministic trackers, not the anomaly layer
+Trained on lab captures alone it flagged almost all real traffic (28.6 false
+notices/hour in the first valid soak). On the two genuinely unseen attacks it
+flagged nothing, before or after: the deterministic trackers caught them. Replaying
+all 23 attack captures with and without the layer changed the log on **zero** of
+them.
 
-It is kept as a net for the unknown, at a contamination level diagnosed against
-a held-out half of real traffic, and its detection value is documented as
-UNPROVEN rather than claimed.
+It is kept as a net for the unknown, at a contamination level diagnosed against a
+held-out half of real traffic, and its detection value is documented as **unproven
+rather than claimed**.
 
-## Temporal attacks belong to trackers, not the model
+## Evasion techniques
 
-A pattern emerged across the project: some attacks have no signature *inside* a
-5-second window — their signature is in **persistence over time**.
+| Technique | Result |
+|---|---|
+| Timing (slow scan) | defended: per-source tracker |
+| Decoys (`nmap -D`) | defended: per-destination tracker + explicit `is_tcp` |
+| Fragmentation (`nmap -f`) | defended: packet-level fragment tracker (evaded completely at first) |
+| Flag anomalies (NULL/FIN/XMAS) | defended: structural signature (RFC 793) |
+| ACK scan (`nmap -sA`) | defended: lone-ACK-probe tracker |
+| Source-port spoofing (`nmap -g 53`) | **tested, not an evasion here** - direction comes from the probe, not from port numbers |
+| Padding (`--data-length`) | **the model fails** (udp_scan at conf 0.34); the trackers catch it; the alert says the model was unsure |
 
-- **Slow scan**: few ports per window, but many accumulated over minutes.
-- **ICMP flood**: raw volume; ICMP has no ports, so all packets between two hosts
-  collapse into a single flow — too few data points to learn a class.
-- **Slowloris**: many connections held open across windows, each sending almost
-  nothing.
+## Method
 
-These fail as ML classes (a per-window model can't see a per-minute pattern) and
-are handled by persistent trackers with a sliding window instead. The model
-covers per-flow attacks; the trackers cover temporal ones. Knowing which tool
-fits which attack is the point.
+Every fix in this project followed the same loop: **diagnose with data, then fix -
+never guess**. A diagnostic script before every change (`diagnose_*.py`, 8 of them),
+a failing test that reproduces the bug, the fix, a mutation that proves the test
+guards it, and a before/after measurement in `metrics.md`.
 
-## Confidence as an active filter
+Three bugs in this project were wiring bugs: the logic was right, the connection
+was missing, and no test checked the output ([day 60](notes/), [day 65](notes/),
+[day 70](notes/)). Each one added a test at the layer where it slipped through.
 
-Every model-based alert carries `predict_proba`'s top probability as confidence.
-Real attacks score ~0.9–1.0; when the model is out of its depth it hovers near
-0.5. Alerts below a threshold (0.70) are **dropped**, not just deprioritised —
-so a Slowloris (which the model misreads as many ephemeral "ports") produces a
-single tracker alert instead of a burst of low-confidence "port scan" noise.
-The model stays quiet when unsure and lets the trackers speak. Rule-based
-detections have no confidence and always pass.
+### Four questions, not one
 
-## The story behind the model
+Most IDS projects report one number: did it detect the attack? This one measures
+four, because days 60-79 showed they are different questions.
 
-The interesting part of this project is not "I trained a Random Forest". It is
-what happened when I evaluated it honestly.
+| Question | Result |
+|---|---|
+| **Detected?** any alert at all | 11/11 unseen, 12/12 in-training |
+| **Correctly labelled?** the right kind is in the log | 9/11 unseen, 12/12 in-training |
+| **Label shown?** the right kind reaches the console, not just the log | 21/23 |
+| **Wrong labels in log?** labels that do not describe the capture | **0/23** |
 
-An early model reported **99.85% accuracy** and looked perfect. In production it
-raised a **false "DoS FLOOD"** on what was actually a decoy port scan. When I
-switched from a random train/test split to **leave-one-capture-out** evaluation
-(hold out a whole capture, train on the rest), that same model scored **0.1%**
-on a scan it had never seen — it classified nearly every scan flow as DoS.
+The two captures missing *Label shown* are the padded scans: the model falls below
+the confidence filter, the trackers catch the scan, and the console shows
+`SLOW PORT SCAN ... [model unsure: udp_scan 0.34]` instead of `PORT SCAN`. The
+attack is detected and the analyst is told the classifier could not label it.
 
-The random split had hidden real problems: a **shortcut** (the model learned
-"no reply traffic = attack", an artifact of capturing DoS on `lo`), a
-**flow-direction bug** (direction decided by IP alone, wrong when both ends
-share an IP), and a **data-diversity gap** (each attack captured one way, so the
-model learned the capture's fingerprint — interface, tool, speed — not the
-behaviour).
+### Noise
 
-The fixes were features and data, not model tricks: per-window **context
-features** (ports per source, flows per port, reply rate), an explicit
-**`is_tcp`** feature (protocol was implicit in flag counts and got diluted),
-correcting the direction, and adding **diverse captures** across sources, tools,
-and protocols. The result classifies every realistic per-flow attack at ~95–100%
-on held-out captures, validated by leave-one-capture-out rather than a misleading
-random split.
+**180 alerts logged, 45 notified.** Every alert is written to `alerts.jsonl` -
+`incidents.py` needs the full evidence, since severity depends on alert counts.
+Only the first per (source, destination, family) within 60 seconds is shown to the
+human, and the next notice lists which detectors stayed silent. One decoy scan went
+from 79 console lines to 7, with every one of its six sources still reported.
 
-Recurring lessons, written up in [`notes/`](notes/):
+158 tests · 82% coverage on the core modules · 40 dated engineering notes ·
+123 commits
 
-- A random split can hide a model that generalizes to zero. Hold out whole
-  captures instead.
-- A traffic type needs *diverse* examples, not just present ones — this bit
-  three times (normal traffic, then UDP, then DNS).
-- A signal the model needs should be an *explicit* feature; left implicit, it
-  gets diluted by richer features.
-- Some attacks are temporal, not per-flow — a rule beats a model there.
-- Every features change invalidates old evaluation results — re-run it.
+### False positives on real traffic
 
-## Pipeline
+Lab captures of a few minutes are not evidence. The system was measured against
+two captures of real home traffic (taken on the Windows host with `pktmon`,
+replayed through the exact live pipeline), no attacks running, so every alert is a
+false positive by construction:
 
-capture (tcpdump / scapy)
--> flows + rich features + per-window context (features.py, context.py)
--> Random Forest (set D) + trackers + Isolation Forest (live_ids.py)
--> alerts with confidence (low-confidence dropped) (alerts.jsonl)
--> incidents -> campaigns, severity + confidence (incidents.py, correlate.py)
--> live dashboard (dashboard.py --watch)
+| | duration | packets | notified |
+|---|---|---|---|
+| held-out half of capture 1 | 0.41 h | 381,467 | **0** |
+| capture 2, fully unseen, another part of the day | 0.54 h | 810,224 | **0** |
 
+Before the normal-traffic data was added to the anomaly model, the same held-out
+half produced 14.5 false notifications per hour.
+
+The first attempt at this measurement produced 75 windows and **0 packets**: the
+sensor in WSL2 saw none of the Windows host's traffic. Zero observations is not
+zero false positives, and the reporting tool now refuses such a session
+([day 72](notes/day72_sensor_visibility.md)).
+
+## Engineering notes
+
+`notes/` holds 40 dated notes, one per working session: the diagnosis that preceded
+each change, the hypotheses that data rejected, the mutations that proved a test
+guards what it claims, and the decisions not to fix something. A few that show the
+method:
+
+- [day 60](notes/day60_stealth_scans.md) - detected is not the same as correctly labelled
+- [day 63](notes/day63_anomaly.md) - the anomaly layer flagged 89% of real normal traffic
+- [day 72](notes/day72_sensor_visibility.md) - a soak test that measured nothing, and why
+- [day 74](notes/day74_anomaly_value.md) - measuring what a whole layer adds: zero
+- [day 77](notes/day77_source_port_scan.md) - an evasion technique that turned out not to be one
+
+## Limitations
+
+- **Sensor placement**: a NIDS sees only what reaches its interface. On a switched
+  network that is its own traffic plus broadcast; real deployments use a SPAN port
+  or a TAP. The soak captures were taken on the Windows host for this reason.
+- `lo` cannot be captured in WSL, so the DoS and brute-force captures come from a
+  single source and are not LOCO-validated.
+- **ACK scan probes are ignored by the scan trackers** since day 65 (they are
+  ACK-first flows). A dedicated tracker covers them; `nmap -sA` is detected, but
+  the general port trackers are blind to ACK-only probes.
+- `slowloris_triple` uses `min(sport, dport)` as the server port: wrong under
+  `nmap -g 53` when the scanned port is above 53. Harmless today (Slowloris needs a
+  completed handshake and persistence), pinned by a test that documents it.
+- The anomaly layer's detection value is unproven (see above).
+- The soak measurements come from one host on one network, on two evenings.
+- The v1 model (`my_model.joblib`) is a fallback for `USE_V2 = False` and is not
+  loaded in normal operation.
+- Tracker alerts report the port count at the moment the threshold was crossed
+  (15), not the final total (200).
 
 ## Running it
-
-Requires Python 3.10, run inside WSL (Ubuntu). Capture needs `sudo`.
 
 ```bash
 python3 -m venv venv
 venv/bin/pip install -r requirements.txt
+venv/bin/python setup_check.py          # what is present and what needs building
 
-# check what's present and what you need to build
-venv/bin/python setup_check.py
+sudo venv/bin/python live_ids.py        # live, on the auto-detected interface
+venv/bin/python correlate.py            # alerts -> incidents -> campaigns
+venv/bin/python dashboard.py            # writes dashboard.html
 
-# run the test suite (34 tests)
-venv/bin/python -m pytest -v
-
-# live IDS (writes alerts to alerts.jsonl); interface is auto-detected
-sudo venv/bin/python live_ids.py
-
-# live dashboard, in another terminal (regenerates + auto-refreshes)
-venv/bin/python dashboard.py --watch      # then open dashboard.html
-
-# correlate the alert log into incidents and campaigns
-venv/bin/python correlate.py
+venv/bin/python metrics_report.py --all # regenerate metrics.md (replay + tests + LOCO)
 ```
 
-The active network interface is detected automatically (`net_iface.py`), because
-under WSL mirrored networking it changes between sessions.
-
-## Repository layout
-
-Active pipeline is in the root. Earlier experiments (the abandoned CICIDS2017
-phase, first capture/flow prototypes, superseded capture scripts) are archived
-in [`legacy/`](legacy/) with their own README — kept for history, not part of
-the current system.
-
-## Known limitations
-
-- **`lo` is not capturable in this WSL setup** (tcpdump and scapy both return 0
-  packets), so DoS and brute-force use single captures and are not
-  leave-one-capture-out validated. Documented, not hidden.
-- **Some attacks are trackers, not ML** (ICMP flood, Slowloris): their signature
-  is temporal or portless, so a threshold rule fits better than a per-window
-  class. See "Temporal attacks" above.
-- **Unseen DNS ~77%**: on a DNS capture not in training, a few flows are still
-  misclassified. In-dataset DNS is 99–100%; isolated per-flow false positives are
-  filtered by aggregation into incidents.
-- **Captures are not in the repo**: the `.pcap` files are personal network
-  traffic and are gitignored, so the trained model cannot be reproduced without
-  capturing your own traffic. `setup_check.py` explains the steps. The code,
-  tests, and pipeline are fully present; only the data is local.
-
-## Screenshots
-
-![Live dashboard](docs/dashboard_1.png)
-![Incidents and campaigns](docs/dashboard_2.png)
-
-## Dashboard
-
-![Dashboard](docs/dashboard.png)
-
-Incidents and campaigns, not raw alerts. Each incident shows which of the three
-layers detected it (`TRACKER` = deterministic rule, `MODEL` = ML with its
-confidence, `ANOMALY` = IsolationForest), how many alerts back it, and how many of
-those reached the analyst. `model unsure` marks an incident where the classifier
-fell below the 0.70 confidence filter - by itself a sign of evasion
-(see [day 79](notes/day79_model_unsure.md)).
-
-## Design philosophy
-
-- A good IDS produces **few good alerts**, not many noisy ones: aggregate →
-  correlate → prioritise, by severity *and* confidence; the model stays quiet
-  when unsure.
-- A model is only as good as how representative its training data is.
-- Security is complementary layers: classifier, trackers, and anomaly detector
-  each cover the others' blind spots.
-- Heuristic detection flags suspicion, it does not prove intent.
+Captures, models and alert logs are gitignored: `setup_check.py` lists what to
+build and which script builds it.
