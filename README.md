@@ -185,6 +185,17 @@ the current system.
 ![Live dashboard](docs/dashboard_1.png)
 ![Incidents and campaigns](docs/dashboard_2.png)
 
+## Dashboard
+
+![Dashboard](docs/dashboard.png)
+
+Incidents and campaigns, not raw alerts. Each incident shows which of the three
+layers detected it (`TRACKER` = deterministic rule, `MODEL` = ML with its
+confidence, `ANOMALY` = IsolationForest), how many alerts back it, and how many of
+those reached the analyst. `model unsure` marks an incident where the classifier
+fell below the 0.70 confidence filter - by itself a sign of evasion
+(see [day 79](notes/day79_model_unsure.md)).
+
 ## Design philosophy
 
 - A good IDS produces **few good alerts**, not many noisy ones: aggregate →
