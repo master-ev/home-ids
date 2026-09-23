@@ -4,6 +4,7 @@ import json
 import trackers
 import os
 import sys
+import flow_state
 from scapy.all import sniff, conf, IP, rdpcap, TCP
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -15,6 +16,7 @@ from net_iface import active_interface, ROUTER_IP
 from trackers import detect_stealth_scans
 from scenarios import CAPTURES
 from trackers import detect_stealth_scans, detect_ack_scans, is_lone_ack_probe
+from labels import (choose_campaign_label, flows_per_port, ANOMALY_VERDICT, SCAN_MIN_PORTS, MIN_ATTACK_FLOWS, FEW_PORTS_MAX, SUSPICIOUS_MIN_FLOWS, SCAN_VERDICT, DOS_VERDICT)
 
 def require_file(path, hint):
     if not os.path.exists(path):
@@ -27,17 +29,6 @@ FRAGMENT_FLOOD_THRESHOLD = 30
 MODEL_ALERT_MIN_CONFIDENCE = 0.70
 USE_V2 = True
 V2_MODEL_PATH = "my_model_v2.joblib"
-port_history = defaultdict(list)
-SLOW_SCAN_WINDOW = 300
-SLOW_SCAN_THRESHOLD = 15
-slow_scan_alerted = set()
-dest_history = defaultdict(list)
-DEST_SCAN_THRESHOLD = 20
-SCAN_MIN_PORTS = 10
-MIN_ATTACK_FLOWS = 10
-FEW_PORTS_MAX = 3
-SUSPICIOUS_MIN_FLOWS = 5
-dest_scan_alerted = set()
 ICMP_FLOOD_THRESHOLD = 100
 ICMP_PROTO = "ICMP"
 SLOWLORIS_MIN_CONNECTIONS = 20
@@ -52,11 +43,6 @@ SESSION_SAVE_EVERY_WINDOWS = 60
 EMPTY_WINDOWS_WARNING = 12
 ALERT_LOG = "alerts.jsonl"
 NORMAL_LABEL = "normal"
-ANOMALY_VERDICT = "anomaly"
-SCAN_VERDICT = "scan"
-DOS_VERDICT = "dos"
-FLOOD_MIN_FLOWS_PER_PORT = 5
-SCAN_MAX_FLOWS_PER_PORT = 3
 NORMAL_FLOWS_CSV = "soak_normal_train.csv"
 FLOW_METADATA_COLUMNS = ["window_time", "is_ipv6"]
 ANOMALY_CONTAMINATION = 0.05
@@ -390,36 +376,9 @@ def flush_window_alerts(pending, window_time):
                 console_text = console_text + suffix
         emit_alert(alert, console_text, window_time)
 
-def check_slow_scan(src, dst, dport, now):
-    key = (src, dst)
-    port_history[key].append((dport, now))
-    port_history[key] = [(p, t) for (p, t) in port_history[key] if now - t < SLOW_SCAN_WINDOW]
-    distinct_ports = len(set(p for (p, t) in port_history[key]))
-    if distinct_ports < SLOW_SCAN_THRESHOLD:
-        slow_scan_alerted.discard(key)
-        return None
-    if key in slow_scan_alerted:
-        return None
-    slow_scan_alerted.add(key)
-    return distinct_ports
-
-def check_dest_scan(dst, dport, now):
-    dest_history[dst].append((dport, now))
-    dest_history[dst] = [(p, t) for (p, t) in dest_history[dst] if now - t < SLOW_SCAN_WINDOW]
-    distinct_ports = len(set(p for (p, t) in dest_history[dst]))
-    if distinct_ports < DEST_SCAN_THRESHOLD:
-        dest_scan_alerted.discard(dst)
-        return None
-    if dst in dest_scan_alerted:
-        return None
-    dest_scan_alerted.add(dst)
-    return distinct_ports
-
 def reset_live_state():
-    port_history.clear()
-    slow_scan_alerted.clear()
-    dest_history.clear()
-    dest_scan_alerted.clear()
+    flow_state.reset_scan_state()
+    slowloris_windows.clear()
     slowloris_windows.clear()
     slowloris_alerted.clear()
     frag_last_seen.clear()
@@ -450,37 +409,6 @@ def report_stealth_scans(packets, pending):
         alert = {"timestamp": timestamp, "kind": "stealth_scan", "description": desc, "source": src, "destination": dst, "num_flows": packet_count, "num_ports": port_count, "model_verdict": "stealth_scan", "confidence": None}
         pending.append((alert, f"{desc} {src} -> {dst}"))
     return stealth_sources
-
-def flows_per_port(num_flows, num_ports):
-    if num_ports == 0:
-        return 0.0
-    return num_flows / num_ports
-
-def choose_campaign_label(main_verdict, num_flows, num_ports):
-    ratio = flows_per_port(num_flows, num_ports)
-    looks_like_flood = ratio >= FLOOD_MIN_FLOWS_PER_PORT
-    looks_like_scan = ratio <= SCAN_MAX_FLOWS_PER_PORT
-    few_ports = num_ports <= FEW_PORTS_MAX
-    enough_attack_flows = num_flows > MIN_ATTACK_FLOWS
-    enough_suspicious_flows = num_flows >= SUSPICIOUS_MIN_FLOWS
-    if main_verdict == ANOMALY_VERDICT and enough_suspicious_flows:
-        return "anomaly", f"ANOMALY ({num_flows} unusual flows, {num_ports} ports)"
-    if main_verdict == "udp_scan" and enough_suspicious_flows:
-        return "udp_scan", f"UDP SCAN({num_ports} ports)"
-    if main_verdict == "syn_flood" and enough_attack_flows and few_ports:
-        return "syn_flood", f"SYN FLOOD ({num_flows} half-open)"
-    if main_verdict == DOS_VERDICT and enough_attack_flows:
-        if few_ports or looks_like_flood:
-            return "dos", f"DoS FLOOD ({num_flows} flows)"
-    if main_verdict == SCAN_VERDICT and enough_suspicious_flows and looks_like_scan:
-        return "port_scan", f"PORT SCAN({num_ports} ports)"
-    if num_ports >= SCAN_MIN_PORTS:
-        return "port_scan", f"PORT SCAN({num_ports} ports)"
-    if enough_attack_flows and few_ports:
-        return "brute_force", f"BRUTE FORCE ({num_flows} attempts)"
-    if enough_suspicious_flows:
-        return "suspicious", f"{num_flows} suspicious flows"
-    return None, None
 
 def analyze_window(packets):
     if len(packets) == 0:
@@ -554,12 +482,12 @@ def collect_window_alerts(packets, window_time, pending):
         flags_of_first = first_tcp_flags(pkts[0])
         is_scan_probe = trackers.counts_as_scan_probe(flags_of_first)
         if is_scan_probe:
-            slow = check_slow_scan(src, dst, dport, window_time)
+            slow = flow_state.check_slow_scan(src, dst, dport, window_time)            
             if slow is not None:
                 desc = f"SLOW PORT SCAN ({slow} ports over time)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": desc, "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None}
                 pending.append((alert, f"{desc} {src} -> {dst}"))
-            dscan = check_dest_scan(dst, dport, window_time)
+            dscan = flow_state.check_dest_scan(dst, dport, window_time)            
             if dscan is not None:
                 desc = f"DISTRIBUTED SCAN ({dscan} ports on target)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": desc, "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None}
