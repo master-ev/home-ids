@@ -12,4 +12,6 @@ soak_*.jsonl
 soak_*.session.json
 *.pcapng
 loco_run*.txt
-soak_normal_*.csv
+soak_normal_*.csvdemo_alerts.jsonl
+demo_part.jsonl
+demo_alerts.jsonl.session.json

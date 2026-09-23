@@ -16,6 +16,7 @@ SOURCE_MODEL = "model"
 SOURCE_ANOMALY = "anomaly"
 SOURCE_MIXED = "mixed"
 ANOMALY_VERDICT = "anomaly"
+MAX_INCIDENTS_SHOWN = 25
 
 
 CSS = """
@@ -102,7 +103,15 @@ code { color: var(--green); }
 .conf.low { color: var(--medium); font-weight: bold; }
 .conf.none { color: #4a5164; }
 .card.review { border-top: 4px solid #4a5164; }
+.badge.layer-tracker { background: #253044; color: #9ec5ff; }
+.badge.layer-model { background: #2b2540; color: #c9a9ff; }
+.badge.layer-anomaly { background: #3a2f22; color: #f5c78a; }
+.badge.layer-mixed { background: #242a33; color: #9aa3b2; }
+.badge.unsure { background: #3a2230; color: #ff9ab0; }
 """
+
+def raw_of(alert):
+    return alert.get("raw", alert)
 
 def esc(value):
     return html.escape(str(value))
@@ -133,7 +142,7 @@ def percent_of(value, maximum):
         return 0
     return int(value * FULL_WIDTH_PERCENT / maximum)
 
-def build_cards(campaign_list, incident_list, alert_count):
+def build_cards(campaign_list, incident_list, alerts):
     incident_count = len(incident_list)
     counts = inc.count_by_severity(campaign_list)
     to_review = 0
@@ -143,6 +152,8 @@ def build_cards(campaign_list, incident_list, alert_count):
             to_review = to_review + 1
         index = index + 1
     total_campaigns = len(campaign_list)
+    alert_count = len(alerts)
+    shown = notified_count(alerts)
     parts = []
     parts.append('<div class="cards">')
     parts.append(f'<div class="card total"><div class="label">Campaigns</div>'f'<div class="value">{total_campaigns}</div></div>')
@@ -150,7 +161,7 @@ def build_cards(campaign_list, incident_list, alert_count):
     parts.append(f'<div class="card medium"><div class="label">MEDIUM campaigns</div>'f'<div class="value">{counts[inc.SEVERITY_MEDIUM]}</div></div>')
     parts.append(f'<div class="card low"><div class="label">LOW campaigns</div>'f'<div class="value">{counts[inc.SEVERITY_LOW]}</div></div>')
     parts.append(f'<div class="card total"><div class="label">Incidents</div>'f'<div class="value">{incident_count}</div></div>')
-    parts.append(f'<div class="card total"><div class="label">Raw alerts</div>'f'<div class="value">{alert_count}</div></div>')
+    parts.append(f'<div class="card total"><div class="label">Alerts logged (shown)</div>'f'<div class="value">{alert_count} 'f'<span style="font-size:18px;color:var(--muted)">({shown})</span></div></div>')
     parts.append(f'<div class="card review"><div class="label">To review</div>' f'<div class="value">{to_review}</div></div>')
     parts.append('</div>')
     return "\n".join(parts)
@@ -185,24 +196,30 @@ def build_campaign_table(campaign_list):
     parts.append('</table>')
     return "\n".join(parts)
 
-def build_incident_table(incident_list):
+def build_incident_table(incident_list, unsure):
     if len(incident_list) == 0:
         return '<p class="empty">No incidents.</p>'
     parts = []
     parts.append('<table>')
-    parts.append('<tr><th>Severity</th><th>Source</th><th>Type</th><th>Conf</th>' '<th>Alerts</th><th>Start</th><th>End</th><th>Duration</th></tr>')
+    parts.append('<tr><th>Severity</th><th>Source</th><th>Type</th><th>Layer</th>' '<th>Conf</th><th>Alerts</th><th>Start</th><th>End</th><th>Duration</th></tr>')
     index = 0
-    while index < len(incident_list):
+    while index < len(incident_list) and index < MAX_INCIDENTS_SHOWN:
         incident = incident_list[index]
         severity = incident["severity"]
         start_text = inc.format_time(incident["first_time"])
         end_text = inc.format_time(incident["last_time"])
         duration_text = inc.format_duration(incident["duration"])
-        parts.append('<tr>')
         confidence = incident["confidence"]
+        layer = incident_layer(incident)
+        layer_html = f'<span class="badge layer-{layer}">{layer.upper()}</span>'
+        pair = (incident["src"], incident["type"])
+        if pair in unsure:
+            layer_html = layer_html + ' <span class="badge unsure">model unsure</span>'
+        parts.append('<tr>')
         parts.append(f'<td><span class="badge {esc(severity)}">{esc(severity)}</span>' f'{review_badge(confidence)}</td>')
         parts.append(f'<td><code>{esc(incident["src"])}</code></td>')
         parts.append(f'<td>{esc(incident["type"])}</td>')
+        parts.append(f'<td>{layer_html}</td>')
         parts.append(confidence_cell(confidence))
         parts.append(f'<td>{incident["alert_count"]}</td>')
         parts.append(f'<td>{esc(start_text)}</td>')
@@ -211,6 +228,9 @@ def build_incident_table(incident_list):
         parts.append('</tr>')
         index = index + 1
     parts.append('</table>')
+    if len(incident_list) > MAX_INCIDENTS_SHOWN:
+        hidden = len(incident_list) - MAX_INCIDENTS_SHOWN
+        parts.append(f'<p class="small">{hidden} more incidents not shown - ' f'the full log is in <code>{esc(DEFAULT_ALERTS_PATH)}</code></p>')
     return "\n".join(parts)
 
 def build_day_chart(incident_list):
@@ -290,6 +310,7 @@ def build_page(alerts, incident_list, campaign_list, source_path, refresh_second
     type_pairs = list(type_counts.items())
     type_pairs.sort(key=inc.pair_count, reverse=True)
     sources = inc.top_sources(incident_list, TOP_SOURCES_LIMIT)
+    unsure = unsure_pairs(alerts)
     parts = []
     parts.append('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">')
     parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
@@ -302,12 +323,12 @@ def build_page(alerts, incident_list, campaign_list, source_path, refresh_second
     if refresh_seconds > NO_REFRESH:
         live_text = f' &middot; <span style="color:var(--green)">live, refresh {refresh_seconds}s</span>'
     parts.append(f'<div class="subtitle">Source: <code>{esc(source_path)}</code> ' f'&middot; generated {esc(generated)}{live_text} &middot; ' f'{len(alerts)} alerts &rarr; {len(incident_list)} incidents ' f'&rarr; {len(campaign_list)} campaigns</div>')
-    parts.append(build_cards(campaign_list, incident_list, len(alerts)))
+    parts.append(build_cards(campaign_list, incident_list, alerts))
     parts.append('<h2>Campaigns (by priority)</h2>')
     parts.append('<div class="panel">' + build_campaign_table(campaign_list) + '</div>')
     parts.append('<h2>Incidents (by priority)</h2>')
-    parts.append('<div class="subtitle">Conf = model confidence. ' '<span class="badge review">review</span> marks low-confidence ' 'detections worth a manual check. A dash means a rule-based ' 'detection (no model score).</div>')
-    parts.append('<div class="panel">' + build_incident_table(incident_list) + '</div>')
+    parts.append('<div class="subtitle">Conf = model confidence. ' '<span class="badge review">review</span> marks low-confidence ' 'detections worth a manual check. A dash means a rule-based ' 'detection (no model score). Layer = which of the three detection ' 'layers produced it.</div>')
+    parts.append('<div class="panel">' + build_incident_table(incident_list, unsure) + '</div>')
     parts.append('<h2>Incidents per day</h2>')
     parts.append('<div class="panel">' + build_day_chart(incident_list) + '</div>')
     parts.append('<h2>Incidents per type</h2>')
@@ -330,9 +351,10 @@ def generate_once(path, refresh_seconds):
     return len(alerts), len(incident_list), len(campaign_list)
 
 def alert_source(alert):
-    if alert.get("model_verdict") == ANOMALY_VERDICT:
+    raw = raw_of(alert)
+    if raw.get("model_verdict") == ANOMALY_VERDICT:
         return SOURCE_ANOMALY
-    if alert.get("confidence") is None:
+    if raw.get("confidence") is None:
         return SOURCE_TRACKER
     return SOURCE_MODEL
 
@@ -346,16 +368,30 @@ def incident_source(alerts):
 
 def model_was_unsure(alerts):
     for alert in alerts:
-        if "model_unsure" in alert:
+        if "model_unsure" in raw_of(alert):
             return True
     return False
 
 def notified_count(alerts):
     shown = 0
     for alert in alerts:
-        if alert.get("notified", True):
+        if raw_of(alert).get("notified", True):
             shown = shown + 1
     return shown
+
+def incident_layer(incident):
+    if incident["type"] == ANOMALY_VERDICT:
+        return SOURCE_ANOMALY
+    if incident.get("confidence") is None:
+        return SOURCE_TRACKER
+    return SOURCE_MODEL
+
+def unsure_pairs(alerts):
+    pairs = set()
+    for alert in alerts:
+        if "model_unsure" in raw_of(alert):
+            pairs.add((alert["src"], alert["type"]))
+    return pairs
 
 def family_counts(alerts, family_of_kind):
     counts = {}
@@ -383,8 +419,7 @@ def main():
         index = index + 1
     if not watch:
         alert_count, incident_count, campaign_count = generate_once(path, NO_REFRESH)
-        print(f"{alert_count} alerts -> {incident_count} incidents "
-              f"-> {campaign_count} campaigns")
+        print(f"{alert_count} alerts -> {incident_count} incidents " f"-> {campaign_count} campaigns")
         print(f"Dashboard written to {OUTPUT_PATH}")
         return
     print(f"Watching {path}, regenerating {OUTPUT_PATH} every {refresh_seconds}s.")
