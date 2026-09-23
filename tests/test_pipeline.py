@@ -265,10 +265,18 @@ def test_floods_are_not_labelled_slowloris(alert_log, capture):
 
 SRCPORT_SCAN_CAPTURE = "srcport_scan.pcap"
 
-
 def test_source_port_scan_is_detected_and_labelled(alert_log):
     require_capture(SRCPORT_SCAN_CAPTURE)
     replay_capture(SRCPORT_SCAN_CAPTURE)
     alerts = read_logged_alerts(alert_log)
     assert len(alerts_of_kind(alerts, "port_scan")) >= 1
     assert "port_scan" in notified_kinds_in(alerts)
+
+PADDED_SCAN_CAPTURES = ["padded_100.pcap", "padded_200.pcap"]
+
+@pytest.mark.parametrize("capture", PADDED_SCAN_CAPTURES)
+def test_padded_scan_is_detected(alert_log, capture):
+    require_capture(capture)
+    replay_capture(capture)
+    alerts = read_logged_alerts(alert_log)
+    assert len(alerts) >= 1

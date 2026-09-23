@@ -34,6 +34,8 @@ EXTRA_CASES = [
     ("slowloris_test.pcap", "slowloris"),
     ("ack_scan.pcap", "ack_scan"),
     ("srcport_scan.pcap", "port_scan"),
+    ("padded_100.pcap", "port_scan"),
+    ("padded_200.pcap", "port_scan"),
 ]
 EXTRA_NORMAL_CASES = ["dns_normal.pcap"]
 GENERIC_RECON_KINDS = ["slow_scan", "distributed_scan"]
