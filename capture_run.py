@@ -17,7 +17,7 @@ MODE_DOS = "dos"
 MODE_BRUTEFORCE = "bruteforce"
 MIN_ARGUMENTS = 5
 MODE_SCAN = "scan"
-HOST_FILTER = "tcp and host 192.168.1.1"
+HOST_FILTER = "host 192.168.1.1"
 NORMAL_SITES = [
     "https://example.com",
     "https://www.wikipedia.org",

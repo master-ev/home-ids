@@ -26,3 +26,18 @@ see `build_my_dataset.py` / `train_mine.py` in the main folder.
   live_ids.py (windowed pipeline, trackers, campaign labels).
 Removed from trackers.py: slowloris_candidates, replaced on day 75 by
 held_open_connections + persistent_connections (handshake + persistence).
+
+### The layered design, tested against the ML layer
+
+`nmap --data-length 200` pushes every size feature far outside the training
+distribution. Measured (day 78):
+
+| | model verdict | model confidence | trackers |
+|---|---|---|---|
+| plain scan | scan | 1.00 | 200 ports, fires |
+| padded scan | udp_scan (wrong) | **0.34** | 200 ports, fires |
+
+The model failed completely; the 0.70 confidence filter kept the wrong label out of
+the log; the deterministic trackers detected the scan; and the alert now carries
+`[model unsure: udp_scan 0.34]`, so the analyst knows the ML layer could not classify
+it - which is itself a sign of evasion.
