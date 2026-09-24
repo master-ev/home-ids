@@ -1,4 +1,5 @@
 # Home IDS
+[![tests](https://github.com/master-ev/home-ids/actions/workflows/tests.yml/badge.svg)](https://github.com/master-ev/home-ids/actions/workflows/tests.yml)
 
 A network intrusion detection system for my own home network: three detection
 layers (Random Forest, deterministic trackers, anomaly detection), 9 attack types,
@@ -189,3 +190,7 @@ venv/bin/python metrics_report.py --all # regenerate metrics.md (replay + tests 
 
 Captures, models and alert logs are gitignored: `setup_check.py` lists what to
 build and which script builds it.
+
+CI runs the data-independent part of the suite on every push: 116 of 172 tests.
+The rest replay captures, which are gitignored because they contain real home
+traffic. Locally, with the captures present, all 172 run.
