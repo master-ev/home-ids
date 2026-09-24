@@ -4,6 +4,7 @@ from collections import defaultdict
 import live_ids
 import flow_state
 import trackers
+import alert_policy
 from features import get_ips_ports, flow_key
 from scapy.all import rdpcap
 
@@ -32,6 +33,10 @@ def install_timers():
     live_ids.slowloris_flow_summaries = timed("live_ids.slowloris_flow_summaries", live_ids.slowloris_flow_summaries)
     live_ids.prepare_window_flows = timed("live_ids.prepare_window_flows", live_ids.prepare_window_flows)
     live_ids.predict_window = timed("live_ids.predict_window", live_ids.predict_window)
+    import packet_view
+    packet_view.build_views = timed("packet_view.build_views", packet_view.build_views)
+    live_ids.collect_window_alerts = timed("live_ids.collect_window_alerts", live_ids.collect_window_alerts)
+    alert_policy.flush_window_alerts = timed("alert_policy.flush_window_alerts", alert_policy.flush_window_alerts)
 
 def split_into_windows(packets):
     windows = []

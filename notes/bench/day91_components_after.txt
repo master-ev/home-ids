@@ -1,0 +1,21 @@
+Using v2 model (set D, 43 features)
+Anomaly model: 2276 flows (lab captures + 1530 real-traffic flows), contamination=0.05
+
+capture: dos.pcap
+packets: 73659  windows: 4
+[02:17:36] ALERT: DoS FLOOD (1448 flows) 192.168.1.236 -> 192.168.1.236 (model: dos conf=0.99)
+
+component                          time(s)   calls    share
+live_ids.prepare_window_flows         4.97       4    44.8%
+trackers.fragment_alerts              0.72       4     6.5%
+trackers.icmp_flood_alerts            0.32       4     2.9%
+live_ids.predict_window               0.18       4     1.6%
+live_ids.report_stealth_scans         0.08       4     0.7%
+live_ids.slowloris_flow_summaries     0.06       4     0.5%
+live_ids.report_ack_scans             0.04       4     0.4%
+flow_state.check_slow_scan            0.01    4407     0.1%
+flow_state.check_dest_scan             0.0    4407     0.0%
+trackers.held_open_connections         0.0       4     0.0%
+accounted                             6.39
+unaccounted                            4.7
+TOTAL                                11.09
