@@ -1,4 +1,5 @@
-from scapy.all import IP, TCP, UDP, ICMP
+from scapy.all import ICMP, IP, IPv6, TCP, UDP
+from features import ICMP_NO_PORT
 
 HEADER_WORD_BYTES = 4
 TCP_PROTO = "TCP"
@@ -19,30 +20,48 @@ def tcp_payload_length(pkt):
     return payload_length
 
 def build_view(pkt):
-    if IP not in pkt:
-        return None
-    ip_layer = pkt[IP]
-    src = ip_layer.src
-    dst = ip_layer.dst
+    ip_layer = pkt.getlayer(IP)
+    if ip_layer is not None:
+        src = ip_layer.src
+        dst = ip_layer.dst
+        ipv4_layer = ip_layer
+    else:
+        ipv6_layer = pkt.getlayer(IPv6)
+        if ipv6_layer is None:
+            return None
+        src = ipv6_layer.src
+        dst = ipv6_layer.dst
+        ipv4_layer = None
     sport = None
     dport = None
     flags = None
     payload_length = None
     proto = None
-    if TCP in pkt:
-        tcp_layer = pkt[TCP]
+    tcp_layer = pkt.getlayer(TCP)
+    if tcp_layer is not None:
         sport = tcp_layer.sport
         dport = tcp_layer.dport
         flags = int(tcp_layer.flags)
-        payload_length = tcp_payload_length(pkt)
         proto = TCP_PROTO
-    elif UDP in pkt:
-        udp_layer = pkt[UDP]
-        sport = udp_layer.sport
-        dport = udp_layer.dport
-        proto = UDP_PROTO
-    elif ICMP in pkt:
-        proto = ICMP_PROTO
+        if ipv4_layer is not None:
+            ip_header_bytes = ipv4_layer.ihl * HEADER_WORD_BYTES
+            tcp_header_bytes = tcp_layer.dataofs * HEADER_WORD_BYTES
+            payload_length = ipv4_layer.len - ip_header_bytes - tcp_header_bytes
+        else:
+            tcp_header_bytes = tcp_layer.dataofs * HEADER_WORD_BYTES
+            payload_length = ipv6_layer.plen - tcp_header_bytes
+    else:
+        udp_layer = pkt.getlayer(UDP)
+        if udp_layer is not None:
+            sport = udp_layer.sport
+            dport = udp_layer.dport
+            proto = UDP_PROTO
+        else:
+            icmp_layer = pkt.getlayer(ICMP)
+            if icmp_layer is not None:
+                sport = ICMP_NO_PORT
+                dport = ICMP_NO_PORT
+                proto = ICMP_PROTO
     view = (src, dst, sport, dport, flags, payload_length, proto)
     return view
 

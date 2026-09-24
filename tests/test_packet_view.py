@@ -39,11 +39,11 @@ def test_udp_view_has_ports_but_no_flags():
     assert view[VIEW_FLAGS] is None
     assert view[VIEW_PROTO] == packet_view.UDP_PROTO
 
-def test_icmp_view_has_no_ports():
+def test_icmp_view_uses_the_no_port_filler():
     packet = IP(src=SOURCE, dst=TARGET) / ICMP()
     view = build_view(packet)
-    assert view[VIEW_SPORT] is None
-    assert view[VIEW_DPORT] is None
+    assert view[VIEW_SPORT] == packet_view.ICMP_NO_PORT
+    assert view[VIEW_DPORT] == packet_view.ICMP_NO_PORT
     assert view[VIEW_PROTO] == packet_view.ICMP_PROTO
 
 def test_packet_without_ip_gives_none():
@@ -69,3 +69,69 @@ def test_stealth_flags_survive_the_round_trip():
     assert null_view[VIEW_FLAGS] == 0
     assert fin_view[VIEW_FLAGS] == 0x01
     assert xmas_view[VIEW_FLAGS] == 0x29
+
+def test_first_view_matches_get_ips_ports():
+    from features import get_ips_ports
+    packet = make_tcp(4444, 80, "S", 0)
+    view = build_view(packet)
+    src, dst, sport, dport, proto = get_ips_ports(packet)
+    assert view[VIEW_SRC] == src
+    assert view[VIEW_DST] == dst
+    assert view[VIEW_SPORT] == sport
+    assert view[VIEW_DPORT] == dport
+    assert view[VIEW_PROTO] == proto
+
+def test_first_view_matches_get_ips_ports_for_udp():
+    from features import get_ips_ports
+    packet = IP(src=SOURCE, dst=TARGET) / UDP(sport=5353, dport=53)
+    view = build_view(packet)
+    src, dst, sport, dport, proto = get_ips_ports(packet)
+    assert view[VIEW_SPORT] == sport
+    assert view[VIEW_DPORT] == dport
+    assert view[VIEW_PROTO] == proto
+
+def test_view_flags_match_first_tcp_flags():
+    import live_ids
+    packet = make_tcp(4444, 80, "SA", 0)
+    view = build_view(packet)
+    assert view[VIEW_FLAGS] == live_ids.first_tcp_flags(packet)
+
+def test_non_tcp_has_no_flags_like_first_tcp_flags():
+    import live_ids
+    packet = IP(src=SOURCE, dst=TARGET) / UDP(sport=1, dport=53)
+    view = build_view(packet)
+    assert view[VIEW_FLAGS] is None
+    assert live_ids.first_tcp_flags(packet) is None
+
+from scapy.all import IPv6
+
+def test_ipv6_tcp_view_matches_get_ips_ports():
+    from features import get_ips_ports
+    packet = IPv6(src="2001:db8::1", dst="2001:db8::2") / TCP(sport=4444, dport=443)
+    packet = IPv6(bytes(packet))
+    view = build_view(packet)
+    assert view is not None
+    src, dst, sport, dport, proto = get_ips_ports(packet)
+    assert view[VIEW_SRC] == src
+    assert view[VIEW_DST] == dst
+    assert view[VIEW_SPORT] == sport
+    assert view[VIEW_DPORT] == dport
+    assert view[VIEW_PROTO] == proto
+
+def test_ipv6_udp_view_matches_get_ips_ports():
+    from features import get_ips_ports
+    packet = IPv6(src="2001:db8::1", dst="2001:db8::2") / UDP(sport=45415, dport=53)
+    packet = IPv6(bytes(packet))
+    view = build_view(packet)
+    src, dst, sport, dport, proto = get_ips_ports(packet)
+    assert view[VIEW_SPORT] == sport
+    assert view[VIEW_DPORT] == dport
+    assert view[VIEW_PROTO] == proto
+
+def test_icmp_ports_match_get_ips_ports():
+    from features import get_ips_ports
+    packet = IP(src=SOURCE, dst=TARGET) / ICMP()
+    view = build_view(packet)
+    src, dst, sport, dport, proto = get_ips_ports(packet)
+    assert view[VIEW_SPORT] == sport
+    assert view[VIEW_DPORT] == dport
