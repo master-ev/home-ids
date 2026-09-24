@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-25 02:21 at commit `63b2a1a` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-25 02:48 at commit `9b6c481` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
@@ -70,7 +70,7 @@ so for them this is in-sample. `dns_normal.pcap` is held out.
 ## Tests
 
 ```
-210 passed in 93.09s (0:01:33)
+217 passed in 94.96s (0:01:34)
 ```
 
 ## LOCO (model generalization, last lines)

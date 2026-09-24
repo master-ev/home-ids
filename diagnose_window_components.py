@@ -12,6 +12,31 @@ WINDOW_SECONDS = 5
 timings = defaultdict(float)
 call_counts = defaultdict(int)
 
+PARENT_COMPONENTS = ["live_ids.collect_window_alerts"]
+
+def print_table(total_seconds):
+    print("")
+    print("component                          time(s)   calls    share")
+    names = sorted(timings.keys(), key=lambda name: timings[name], reverse=True)
+    accounted = 0.0
+    for name in names:
+        if name in PARENT_COMPONENTS:
+            continue
+        seconds = timings[name]
+        accounted = accounted + seconds
+        share = 100.0 * seconds / total_seconds
+        print(name.ljust(34) + str(round(seconds, 2)).rjust(8) + str(call_counts[name]).rjust(8) + (str(round(share, 1)) + "%").rjust(9))
+    for name in PARENT_COMPONENTS:
+        if name not in timings:
+            continue
+        parent_seconds = timings[name]
+        own_seconds = parent_seconds - accounted
+        print((name + " (own)").ljust(34) + str(round(own_seconds, 2)).rjust(8))
+    print("accounted".ljust(34) + str(round(accounted, 2)).rjust(8))
+    unaccounted = total_seconds - accounted
+    print("unaccounted".ljust(34) + str(round(unaccounted, 2)).rjust(8))
+    print("TOTAL".ljust(34) + str(round(total_seconds, 2)).rjust(8))
+
 def timed(name, function):
     def wrapper(*args, **kwargs):
         started = time.perf_counter()
@@ -62,21 +87,6 @@ def count_flows(packets):
         if info is not None:
             flows[flow_key(info)].append(pkt)
     return len(flows)
-
-def print_table(total_seconds):
-    print("")
-    print("component                          time(s)   calls    share")
-    names = sorted(timings.keys(), key=lambda name: timings[name], reverse=True)
-    accounted = 0.0
-    for name in names:
-        seconds = timings[name]
-        accounted = accounted + seconds
-        share = 100.0 * seconds / total_seconds
-        print(name.ljust(34) + str(round(seconds, 2)).rjust(8) + str(call_counts[name]).rjust(8) + (str(round(share, 1)) + "%").rjust(9))
-    unaccounted = total_seconds - accounted
-    print("accounted".ljust(34) + str(round(accounted, 2)).rjust(8))
-    print("unaccounted".ljust(34) + str(round(unaccounted, 2)).rjust(8))
-    print("TOTAL".ljust(34) + str(round(total_seconds, 2)).rjust(8))
 
 def main():
     if len(sys.argv) < 2:
