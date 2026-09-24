@@ -33,16 +33,9 @@ def features_of(flow_list):
         rows.append(feats)
     return rows
 
-def predict_all(flow_list, rows):
-    import pandas as pd
-    from feature_sets import clean_features
-    verdicts = []
-    for row in rows:
-        frame = pd.DataFrame([{n: row.get(n, 0) for n in live_ids.clf_features_v2}])[live_ids.clf_features_v2]
-        frame = clean_features(frame)
-        probabilities = live_ids.classifier_v2.predict_proba(frame)[0]
-        verdicts.append(probabilities.argmax())
-    return verdicts
+def predict_all(prepared):
+    predictions, anomalies = live_ids.predict_window(prepared)
+    return predictions, anomalies
 
 def benchmark(path):
     packets = rdpcap(path)
