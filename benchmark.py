@@ -33,7 +33,12 @@ def features_of(flow_list):
         rows.append(feats)
     return rows
 
-def predict_all(prepared):
+def predict_all(flow_list, rows):
+    prepared = []
+    index = 0
+    while index < len(rows):
+        prepared.append((index, flow_list[index], rows[index]))
+        index = index + 1
     predictions, anomalies = live_ids.predict_window(prepared)
     return predictions, anomalies
 
