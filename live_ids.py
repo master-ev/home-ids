@@ -18,6 +18,7 @@ from net_iface import active_interface, ROUTER_IP
 from trackers import detect_stealth_scans, detect_ack_scans, is_lone_ack_probe
 from scenarios import CAPTURES
 from labels import choose_campaign_label, ANOMALY_VERDICT
+from batch_predict import (build_feature_frame, predict_labels_batch, predict_anomalies_batch,)
 
 def require_file(path, hint):
     if not os.path.exists(path):
@@ -49,6 +50,7 @@ FLOW_METADATA_COLUMNS = ["window_time", "is_ipv6"]
 ANOMALY_CONTAMINATION = 0.05
 ANOMALY_RANDOM_SEED = 42
 HEADER_WORD_BYTES = 4
+MISSING_FEATURE_DEFAULT = 0
 frag_last_seen = {}
 slowloris_last_seen = {}
 slowloris_previous_conns = {}
@@ -273,6 +275,51 @@ def reset_live_state():
     slowloris_last_seen.clear()
     slowloris_previous_conns.clear()
 
+def rows_for_feature_names(feature_dicts, feature_names):
+    rows = []
+    for feats in feature_dicts:
+        row = {}
+        for name in feature_names:
+            row[name] = feats.get(name, MISSING_FEATURE_DEFAULT)
+        rows.append(row)
+    return rows
+
+def prepare_window_flows(flows, context_rows):
+    prepared = []
+    position = 0
+    for key, pkts in flows.items():
+        first_info = get_ips_ports(pkts[0])
+        if first_info is not None and first_info[4] == ICMP_PROTO:
+            position = position + 1
+            continue
+        feats = compute_rich_features(pkts)
+        feats["destination_port"] = get_ips_ports(pkts[0])[3]
+        context = context_rows[position]
+        for name in CONTEXT_FEATURES:
+            feats[name] = context[name]
+        position = position + 1
+        prepared.append((key, pkts, feats))
+    return prepared
+
+def predict_window(prepared):
+    feature_dicts = []
+    for key, pkts, feats in prepared:
+        feature_dicts.append(feats)
+    if USE_V2:
+        active_features = clf_features_v2
+        active_classifier = classifier_v2
+    else:
+        active_features = clf_features
+        active_classifier = classifier
+    clf_rows = rows_for_feature_names(feature_dicts, active_features)
+    clf_frame = build_feature_frame(clf_rows, active_features)
+    clf_frame = clean_features(clf_frame)
+    predictions = predict_labels_batch(active_classifier, clf_frame)
+    anom_rows = rows_for_feature_names(feature_dicts, anomaly_features)
+    anom_frame = build_feature_frame(anom_rows, anomaly_features)
+    anomalies = predict_anomalies_batch(anomaly_model, anom_frame)
+    return predictions, anomalies
+
 def collect_window_alerts(packets, window_time, pending):
     for src, dst, count in trackers.fragment_alerts(packets):
         pair = (src, dst)
@@ -305,44 +352,29 @@ def collect_window_alerts(packets, window_time, pending):
         evasion_sources.add(ack_source)
     context_rows = compute_context(flow_list)
     campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter(), "confidences": []})
-    position = 0
-    for key, pkts in flows.items():
-        first_info = get_ips_ports(pkts[0])
-        if first_info is not None and first_info[4] == ICMP_PROTO:
-            position = position + 1
-            continue
-        feats = compute_rich_features(pkts)
-        feats["destination_port"] = get_ips_ports(pkts[0])[3]
-        context = context_rows[position]
-        for name in CONTEXT_FEATURES:
-            feats[name] = context[name]
-        position = position + 1
-        if USE_V2:
-            v2_row = pd.DataFrame([{n: feats.get(n, 0) for n in clf_features_v2}])[clf_features_v2]
-            v2_row = clean_features(v2_row)
-            probabilities = classifier_v2.predict_proba(v2_row)[0]
-            best_index = probabilities.argmax()
-            clf_verdict = classifier_v2.classes_[best_index]
-            confidence = float(probabilities[best_index])
-        else:
-            clf_row = pd.DataFrame([{n: feats.get(n, 0) for n in clf_features}])[clf_features]
-            probabilities = classifier.predict_proba(clf_row)[0]
-            best_index = probabilities.argmax()
-            clf_verdict = classifier.classes_[best_index]
-            confidence = float(probabilities[best_index])
-        anom_row = pd.DataFrame([{n: feats.get(n, 0) for n in anomaly_features}])[anomaly_features]
-        anom_verdict = anomaly_model.predict(anom_row)[0]
-        is_attack = (clf_verdict != NORMAL_LABEL) or (anom_verdict == -1)
+    prepared = prepare_window_flows(flows, context_rows)
+    if len(prepared) == 0:
+        predictions = []
+        anomalies = []
+    else:
+        predictions, anomalies = predict_window(prepared)
+    flow_index = 0
+    while flow_index < len(prepared):
+        key, pkts, feats = prepared[flow_index]
+        clf_verdict, confidence = predictions[flow_index]
+        is_anomaly = anomalies[flow_index]
+        flow_index = flow_index + 1
+        is_attack = (clf_verdict != NORMAL_LABEL) or is_anomaly
         src, dst, sport, dport, proto = get_ips_ports(pkts[0])
         flags_of_first = first_tcp_flags(pkts[0])
         is_scan_probe = trackers.counts_as_scan_probe(flags_of_first)
         if is_scan_probe:
-            slow = flow_state.check_slow_scan(src, dst, dport, window_time)            
+            slow = flow_state.check_slow_scan(src, dst, dport, window_time)
             if slow is not None:
                 desc = f"SLOW PORT SCAN ({slow} ports over time)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "slow_scan", "description": desc, "source": src, "destination": dst, "num_flows": slow, "num_ports": slow, "model_verdict": "slow_scan", "confidence": None}
                 pending.append((alert, f"{desc} {src} -> {dst}"))
-            dscan = flow_state.check_dest_scan(dst, dport, window_time)            
+            dscan = flow_state.check_dest_scan(dst, dport, window_time)
             if dscan is not None:
                 desc = f"DISTRIBUTED SCAN ({dscan} ports on target)"
                 alert = {"timestamp": datetime.now().isoformat(), "kind": "distributed_scan", "description": desc, "source": "multiple", "destination": dst, "num_flows": dscan, "num_ports": dscan, "model_verdict": "distributed_scan", "confidence": None}
@@ -403,7 +435,7 @@ def collect_window_alerts(packets, window_time, pending):
             timestamp = datetime.now().isoformat()
             desc = f"SLOWLORIS ({len(persistent)} connections held open on port {port})"
             alert = {"timestamp": timestamp, "kind": "slowloris", "description": desc, "source": host_a, "destination": host_b, "num_flows": len(conns), "num_ports": 1, "model_verdict": "slowloris", "confidence": None}
-            pending.append((alert, f"{desc} {host_a} <-> {host_b}"))  
+            pending.append((alert, f"{desc} {host_a} <-> {host_b}"))
 
 def parse_log_argument(argv):
     if "--log" not in argv:
