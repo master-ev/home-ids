@@ -3,7 +3,8 @@ import os
 import sys
 from collections import Counter
 from datetime import datetime
-from live_ids import family_of, SESSION_SUFFIX
+from alert_policy import family_of
+from live_ids import SESSION_SUFFIX
 
 SECONDS_PER_HOUR = 3600
 TOP_PAIRS_SHOWN = 10
