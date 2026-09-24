@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-23 23:55 at commit `4ebf377` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-24 18:00 at commit `781bdbb` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
