@@ -1,0 +1,56 @@
+Using v2 model (set D, 43 features)
+Anomaly model: 2276 flows (lab captures + 1530 real-traffic flows), contamination=0.05
+[00:57:20] ALERT: DoS FLOOD (1448 flows) 192.168.1.236 -> 192.168.1.236 (model: dos conf=0.99)
+dos.pcap
+  packets=73659  flows=4759  windows=4
+  flow grouping              1983.4 ms
+  feature extraction         4944.4 ms
+  context features            321.3 ms
+  model prediction          29506.2 ms
+  WHOLE pipeline            88153.4 ms
+  slowest single window: 25907.6 ms (budget 5000 ms)
+  throughput: 836 packets/s
+  real-time margin: 0.2x
+
+[00:58:34] ALERT: PORT SCAN(6 ports) 10.0.0.1 -> 192.168.1.1 (model: scan conf=1.00)
+[00:58:34] ALERT: PORT SCAN(6 ports) 10.0.0.2 -> 192.168.1.1 (model: scan conf=1.00)
+[00:58:34] ALERT: PORT SCAN(6 ports) 10.0.0.3 -> 192.168.1.1 (model: scan conf=1.00)
+[00:58:34] ALERT: PORT SCAN(6 ports) 10.0.0.4 -> 192.168.1.1 (model: scan conf=1.00)
+[00:58:34] ALERT: PORT SCAN(6 ports) 10.0.0.5 -> 192.168.1.1 (model: scan conf=1.00)
+[00:58:34] ALERT: PORT SCAN(6 ports) 192.168.1.236 -> 192.168.1.1 (model: scan conf=1.00)
+[00:58:36] ALERT: DISTRIBUTED SCAN (20 ports on target, multiple sources) -> 192.168.1.1
+decoy.pcap
+  packets=720  flows=720  windows=12
+  flow grouping                18.8 ms
+  feature extraction           89.4 ms
+  context features             36.6 ms
+  model prediction           3967.3 ms
+  WHOLE pipeline             8928.1 ms
+  slowest single window: 822.7 ms (budget 5000 ms)
+  throughput: 81 packets/s
+  real-time margin: 6.7x
+
+normal_web.pcap
+  packets=1126  flows=73  windows=10
+  flow grouping                29.3 ms
+  feature extraction           70.7 ms
+  context features              2.0 ms
+  model prediction            435.9 ms
+  WHOLE pipeline             1026.6 ms
+  slowest single window: 169.4 ms (budget 5000 ms)
+  throughput: 1097 packets/s
+  real-time margin: 48.7x
+
+[00:58:48] ALERT: PORT SCAN(150 ports) 192.168.1.236 -> 192.168.1.1 (model: scan conf=1.00)
+[00:58:48] ALERT: DISTRIBUTED SCAN (20 ports on target, multiple sources) -> 192.168.1.1
+scan_connect_router.pcap
+  packets=806  flows=401  windows=3
+  flow grouping                20.2 ms
+  feature extraction           85.9 ms
+  context features             26.0 ms
+  model prediction           2450.7 ms
+  WHOLE pipeline             5178.6 ms
+  slowest single window: 1984.9 ms (budget 5000 ms)
+  throughput: 156 packets/s
+  real-time margin: 2.9x
+

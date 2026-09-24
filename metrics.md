@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-24 18:00 at commit `781bdbb` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-25 01:16 at commit `292b16d` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
@@ -66,4 +66,30 @@ so for them this is in-sample. `dns_normal.pcap` is held out.
 | dns_div2.pcap | 0 | 0 | - |
 | dns_div3.pcap | 0 | 0 | - |
 | dns_normal.pcap | 0 | 0 | - |
+
+## Tests
+
+```
+190 passed in 108.56s (0:01:48)
+```
+
+## LOCO (model generalization, last lines)
+
+```
+normal_mixed.pcap       normal         100.0   100.0   100.0   100.0
+normal_stream.pcap      normal         100.0   100.0   100.0   100.0
+normal_web.pcap         normal         100.0   100.0   100.0   100.0
+scan.pcap               scan           100.0   100.0   100.0    99.9
+scan_connect_router.pcapscan           100.0   100.0   100.0   100.0
+scan_slow_router.pcap   scan           100.0   100.0   100.0   100.0
+scan_syn_lo.pcap        scan            99.4    99.4    99.4    99.4
+syn_flood1.pcap         syn_flood        0.5   100.0   100.0   100.0
+syn_flood2.pcap         syn_flood      100.0   100.0   100.0   100.0
+udp_scan1.pcap          udp_scan        95.6    95.6    95.6    95.6
+udp_scan2.pcap          udp_scan        99.4    99.4    99.4    99.4
+mean                                    93.8    99.1    99.0    99.1
+worst                                    0.5    88.6    88.6    88.6
+Results below 80%: what did the model say?
+set A  syn_flood1.pcap          true=syn_flood   predicted={'udp_scan': 210, 'syn_flood': 1}
+```
 
