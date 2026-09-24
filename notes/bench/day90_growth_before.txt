@@ -1,0 +1,18 @@
+
+check_slow_scan
+  flows      time(s)   ratio vs previous
+     500      0.0076           -
+    1000      0.0284       3.76x
+    2000      0.1337        4.7x
+    4000      0.5029       3.76x
+    8000      1.9699       3.92x
+  (linear -> about 2.0x per doubling, quadratic -> about 4.0x)
+
+check_dest_scan
+  flows      time(s)   ratio vs previous
+     500      0.0075           -
+    1000      0.0285       3.81x
+    2000      0.1172       4.12x
+    4000      0.4479       3.82x
+    8000      1.8888       4.22x
+  (linear -> about 2.0x per doubling, quadratic -> about 4.0x)
