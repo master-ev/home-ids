@@ -18,3 +18,15 @@ is symmetric.
 Stateful and I/O code (emit_alert, collect_window_alerts, load_models): property
 testing fits pure functions.
 
+## What it found
+Two properties failed, and neither was a code bug: float addition loses precision
+on large timestamps, so (last + elapsed) - last is not exactly elapsed. Minimal
+counterexample from hypothesis: last=268435455.0, elapsed=cooldown=1.0751793617764633.
+The tests now assert against the MEASURED difference and skip a 1 ms band around
+the threshold - that is what the code actually promises. No consequence in practice
+(real timestamps are ~1.79e9 and the thresholds are 60 s), but now it is known
+rather than assumed.
+
+## Also found, by CI rather than by hypothesis
+The CI run was red while all 181 tests passed locally: an older commit was being
+tested. The value of CI is exactly this - local green does not mean published green.
