@@ -287,26 +287,26 @@ def rows_for_feature_names(feature_dicts, feature_names):
         rows.append(row)
     return rows
 
-def prepare_window_flows(flows, context_rows):
+def prepare_window_flows(flows, flow_views_by_key, context_rows):
     prepared = []
     position = 0
     for key, pkts in flows.items():
-        first_info = get_ips_ports(pkts[0])
-        if first_info is not None and first_info[4] == ICMP_PROTO:
+        first_view = flow_views_by_key[key][0]
+        if first_view is not None and first_view[packet_view.VIEW_PROTO] == ICMP_PROTO:
             position = position + 1
             continue
         feats = compute_rich_features(pkts)
-        feats["destination_port"] = get_ips_ports(pkts[0])[3]
+        feats["destination_port"] = first_view[packet_view.VIEW_DPORT]
         context = context_rows[position]
         for name in CONTEXT_FEATURES:
             feats[name] = context[name]
         position = position + 1
-        prepared.append((key, pkts, feats))
+        prepared.append((key, pkts, feats, first_view))
     return prepared
 
 def predict_window(prepared):
     feature_dicts = []
-    for key, pkts, feats in prepared:
+    for key, pkts, feats, first_view in prepared:
         feature_dicts.append(feats)
     if USE_V2:
         active_features = clf_features_v2
@@ -362,7 +362,7 @@ def collect_window_alerts(packets, window_time, pending):
         evasion_sources.add(ack_source)
     context_rows = compute_context(flow_list)
     campaigns = defaultdict(lambda: {"ports": set(), "count": 0, "verdicts": Counter(), "confidences": []})
-    prepared = prepare_window_flows(flows, context_rows)
+    prepared = prepare_window_flows(flows, flow_views_by_key, context_rows)
     if len(prepared) == 0:
         predictions = []
         anomalies = []
@@ -370,13 +370,15 @@ def collect_window_alerts(packets, window_time, pending):
         predictions, anomalies = predict_window(prepared)
     flow_index = 0
     while flow_index < len(prepared):
-        key, pkts, feats = prepared[flow_index]
+        key, pkts, feats, first_view = prepared[flow_index]
         clf_verdict, confidence = predictions[flow_index]
         is_anomaly = anomalies[flow_index]
         flow_index = flow_index + 1
         is_attack = (clf_verdict != NORMAL_LABEL) or is_anomaly
-        src, dst, sport, dport, proto = get_ips_ports(pkts[0])
-        flags_of_first = first_tcp_flags(pkts[0])
+        src = first_view[packet_view.VIEW_SRC]
+        dst = first_view[packet_view.VIEW_DST]
+        dport = first_view[packet_view.VIEW_DPORT]
+        flags_of_first = first_view[packet_view.VIEW_FLAGS]
         is_scan_probe = trackers.counts_as_scan_probe(flags_of_first)
         if is_scan_probe:
             slow = flow_state.check_slow_scan(src, dst, dport, window_time)

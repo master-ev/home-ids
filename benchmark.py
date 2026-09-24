@@ -6,6 +6,7 @@ from scapy.all import rdpcap
 import live_ids
 from features import get_ips_ports, flow_key, compute_rich_features
 from context import compute_context
+import packet_view
 from replay import split_into_windows
 
 NAME_WIDTH = 24
@@ -37,8 +38,10 @@ def predict_all(flow_list, rows):
     prepared = []
     index = 0
     while index < len(rows):
-        prepared.append((index, flow_list[index], rows[index]))
+        first_view = packet_view.build_view(flow_list[index][0])
+        prepared.append((index, flow_list[index], rows[index], first_view))
         index = index + 1
+
     predictions, anomalies = live_ids.predict_window(prepared)
     return predictions, anomalies
 
