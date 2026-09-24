@@ -4,6 +4,7 @@ import pytest
 from scapy.all import rdpcap
 from live_ids import extract_tcp_info
 from trackers import detect_stealth_scans
+import packet_view
 MODEL = "my_model_v2.joblib"
 SCAN_CAPTURE = "scan.pcap"
 FRAG_CAPTURE = "frag_scan.pcap"
@@ -58,7 +59,8 @@ def test_stealth_capture_detected(capture):
     if not os.path.exists(capture):
         pytest.skip("capture not available: " + capture)
     packets = rdpcap(capture)
-    tcp_packets = extract_tcp_info(packets)
+    views = packet_view.build_views(packets)
+    tcp_packets = extract_tcp_info(views)
     alerts = detect_stealth_scans(tcp_packets)
     assert len(alerts) >= 1
     expected = EXPECTED_TYPES[capture]

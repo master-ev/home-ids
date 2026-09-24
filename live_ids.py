@@ -1,6 +1,7 @@
 import joblib
 import pandas as pd
 import json
+import packet_view
 import trackers
 import os
 import sys
@@ -62,17 +63,15 @@ anomaly_model = None
 anomaly_features = None
 INTERFACE = None
 
-def extract_tcp_info(packets):
+def extract_tcp_info(views):
     tcp_packets = []
-    for pkt in packets:
-        has_ip = IP in pkt
-        has_tcp = TCP in pkt
-        if not (has_ip and has_tcp):
+    for view in views:
+        if not packet_view.is_tcp(view):
             continue
-        src = pkt[IP].src
-        dst = pkt[IP].dst
-        dport = pkt[TCP].dport
-        flags = int(pkt[TCP].flags)
+        src = view[packet_view.VIEW_SRC]
+        dst = view[packet_view.VIEW_DST]
+        dport = view[packet_view.VIEW_DPORT]
+        flags = view[packet_view.VIEW_FLAGS]
         tcp_packets.append((src, dst, dport, flags))
     return tcp_packets
 
@@ -87,21 +86,21 @@ def tcp_payload_length(pkt):
     payload_length = pkt[IP].len - ip_header_bytes - tcp_header_bytes
     return payload_length
 
-def flow_ack_probe(pkts):
-    first = pkts[0]
-    if not (IP in first and TCP in first):
+def flow_ack_probe(flow_views):
+    first = flow_views[0]
+    if not packet_view.is_tcp(first):
         return None
-    initiator = first[IP].src
+    initiator = first[packet_view.VIEW_SRC]
     packet_infos = []
-    for pkt in pkts:
-        if not (IP in pkt and TCP in pkt):
+    for view in flow_views:
+        if not packet_view.is_tcp(view):
             continue
-        from_initiator = pkt[IP].src == initiator
-        flags = int(pkt[TCP].flags)
-        payload_length = tcp_payload_length(pkt)
+        from_initiator = view[packet_view.VIEW_SRC] == initiator
+        flags = view[packet_view.VIEW_FLAGS]
+        payload_length = view[packet_view.VIEW_PAYLOAD]
         packet_infos.append((from_initiator, flags, payload_length))
     is_probe = is_lone_ack_probe(packet_infos)
-    return (first[IP].src, first[IP].dst, first[TCP].dport, is_probe)
+    return (first[packet_view.VIEW_SRC], first[packet_view.VIEW_DST], first[packet_view.VIEW_DPORT], is_probe)
 
 def slowloris_triple(info):
     src, dst, sport, dport, proto = info
@@ -109,21 +108,25 @@ def slowloris_triple(info):
     server_port = min(sport, dport)
     return (hosts[0], hosts[1], server_port)
 
-def slowloris_flow_summaries(flows):
+def slowloris_flow_summaries(flow_views_by_key):
     summaries = []
-    for key, pkts in flows.items():
-        first = pkts[0]
-        if not (IP in first and TCP in first):
+    for key, flow_views in flow_views_by_key.items():
+        first = flow_views[0]
+        if not packet_view.is_tcp(first):
             continue
-        info = get_ips_ports(first)
-        initiator = first[IP].src
+        src = first[packet_view.VIEW_SRC]
+        dst = first[packet_view.VIEW_DST]
+        sport = first[packet_view.VIEW_SPORT]
+        dport = first[packet_view.VIEW_DPORT]
+        info = (src, dst, sport, dport, packet_view.TCP_PROTO)
+        initiator = src
         initiator_ack = False
         closed = False
-        for pkt in pkts:
-            if not (IP in pkt and TCP in pkt):
+        for view in flow_views:
+            if not packet_view.is_tcp(view):
                 continue
-            base_flags = int(pkt[TCP].flags) & trackers.TCP_BASE_FLAGS_MASK
-            from_initiator = pkt[IP].src == initiator
+            base_flags = view[packet_view.VIEW_FLAGS] & trackers.TCP_BASE_FLAGS_MASK
+            from_initiator = view[packet_view.VIEW_SRC] == initiator
             has_ack = (base_flags & trackers.TCP_ACK) != 0
             if from_initiator and has_ack:
                 initiator_ack = True
@@ -131,7 +134,7 @@ def slowloris_flow_summaries(flows):
             is_rst = (base_flags & trackers.TCP_RST) != 0
             if is_fin or is_rst:
                 closed = True
-        summary = {"triple": slowloris_triple(info), "conn": key, "packets": len(pkts), "initiator_ack": initiator_ack, "closed": closed}
+        summary = {"triple": slowloris_triple(info), "conn": key, "packets": len(flow_views), "initiator_ack": initiator_ack, "closed": closed}
         summaries.append(summary)
     return summaries
 
@@ -237,8 +240,8 @@ def log_alert(alert):
     with open(ALERT_LOG, "a") as f:
         f.write(json.dumps(alert) + "\n")
 
-def report_stealth_scans(packets, pending):
-    stealth_input = extract_tcp_info(packets)
+def report_stealth_scans(views, pending):
+    stealth_input = extract_tcp_info(views)
     stealth_alerts = detect_stealth_scans(stealth_input)
     stealth_sources = set()
     for stealth in stealth_alerts:
@@ -321,6 +324,7 @@ def predict_window(prepared):
     return predictions, anomalies
 
 def collect_window_alerts(packets, window_time, pending):
+    views = packet_view.build_views(packets)
     for src, dst, count in trackers.fragment_alerts(packets):
         pair = (src, dst)
         last_seen = frag_last_seen.get(pair)
@@ -337,16 +341,22 @@ def collect_window_alerts(packets, window_time, pending):
         desc = f"ICMP FLOOD ({count} packets)"
         alert = {"timestamp": timestamp, "kind": "icmp_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 0, "model_verdict": "icmp_flood", "confidence": None}
         pending.append((alert, f"{desc} {src} -> {dst}"))
-    stealth_sources = report_stealth_scans(packets, pending)
+    stealth_sources = report_stealth_scans(views, pending)
     flows = defaultdict(list)
+    flow_views_by_key = defaultdict(list)
+    packet_index = 0
     for p in packets:
         info = get_ips_ports(p)
         if info is not None:
-            flows[flow_key(info)].append(p)
+            key = flow_key(info)
+            flows[key].append(p)
+            flow_views_by_key[key].append(views[packet_index])
+        packet_index = packet_index + 1
     if not flows:
         return
     flow_list = list(flows.values())
-    ack_sources = report_ack_scans(flow_list, pending)
+    view_list = list(flow_views_by_key.values())
+    ack_sources = report_ack_scans(view_list, pending)
     evasion_sources = set(stealth_sources)
     for ack_source in ack_sources:
         evasion_sources.add(ack_source)
@@ -411,7 +421,7 @@ def collect_window_alerts(packets, window_time, pending):
             confidence_text = f" conf={confidence:.2f}"
         alert = {"timestamp": timestamp, "kind": kind, "description": desc, "source": src, "destination": dst, "num_flows": num_flows, "num_ports": num_ports, "model_verdict": main_verdict, "confidence": confidence}
         pending.append((alert, f"{desc} {src} -> {dst} (model: {main_verdict}{confidence_text})"))
-    summaries = slowloris_flow_summaries(flows)
+    summaries = slowloris_flow_summaries(flow_views_by_key)
     current_conns = trackers.held_open_connections(summaries)
     for triple in sorted(current_conns):
         conns = current_conns[triple]
