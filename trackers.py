@@ -1,4 +1,8 @@
+from collections import defaultdict
+
 from scapy.all import IP, TCP, UDP
+
+from packet_view import TCP_PROTO, VIEW_DPORT, VIEW_DST, VIEW_FLAGS, VIEW_PROTO, VIEW_SRC
 
 ICMP_FLOOD_THRESHOLD = 100
 FRAGMENT_FLOOD_THRESHOLD = 30
@@ -216,3 +220,52 @@ def held_open_connections(flow_summaries):
 
 def persistent_connections(current_conns, previous_conns):
     return current_conns & previous_conns
+
+SYN_FLOOD_MIN_HALF_OPEN = 30
+
+def is_syn_without_ack(flow_views):
+    saw_syn = False
+    saw_ack = False
+    first = flow_views[0]
+    if first is None:
+        return False
+    initiator = first[VIEW_SRC]
+    for view in flow_views:
+        if view is None:
+            continue
+        if view[VIEW_PROTO] != TCP_PROTO:
+            continue
+        if view[VIEW_SRC] != initiator:
+            continue
+        flags = view[VIEW_FLAGS]
+        base_flags = flags & TCP_BASE_FLAGS_MASK
+        if (base_flags & TCP_SYN) != 0:
+            saw_syn = True
+        if (base_flags & TCP_ACK) != 0:
+            saw_ack = True
+    return saw_syn and not saw_ack
+
+SYN_FLOOD_MIN_HALF_OPEN = 30
+SYN_FLOOD_MAX_PORTS = 3
+
+
+def syn_flood_alerts(flow_views_by_key):
+    half_open_counts = defaultdict(int)
+    half_open_ports = defaultdict(set)
+    for key, flow_views in flow_views_by_key.items():
+        if not is_syn_without_ack(flow_views):
+            continue
+        first = flow_views[0]
+        src = first[VIEW_SRC]
+        dst = first[VIEW_DST]
+        dport = first[VIEW_DPORT]
+        pair = (src, dst)
+        half_open_counts[pair] = half_open_counts[pair] + 1
+        half_open_ports[pair].add(dport)
+    alerts = []
+    for pair, count in half_open_counts.items():
+        distinct_ports = len(half_open_ports[pair])
+        if count >= SYN_FLOOD_MIN_HALF_OPEN and distinct_ports <= SYN_FLOOD_MAX_PORTS:
+            src, dst = pair
+            alerts.append((src, dst, count))
+    return alerts
