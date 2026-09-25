@@ -78,10 +78,16 @@ def test_scan_state_scales_linearly():
             flow_state.check_slow_scan(SOURCE, TARGET, port, WINDOW_TIME)
             port = port + 1
         return time.perf_counter() - started
-    small_seconds = time_for(2000)
-    large_seconds = time_for(4000)
-    ratio = large_seconds / small_seconds
-    assert ratio < 3.0
+    ratios = []
+    run = 0
+    while run < 5:
+        small_seconds = time_for(2000)
+        large_seconds = time_for(4000)
+        ratios.append(large_seconds / small_seconds)
+        run = run + 1
+    ratios.sort()
+    median_ratio = ratios[len(ratios) // 2]
+    assert median_ratio < 3.0
 
 def test_port_counter_matches_the_history():
     probes = [(1000.0, 80), (1000.0, 80), (1000.0, 443), (1005.0, 22)]
