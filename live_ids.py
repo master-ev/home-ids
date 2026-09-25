@@ -361,6 +361,11 @@ def collect_window_alerts(packets, window_time, pending):
     flow_list = list(flows.values())
     view_list = list(flow_views_by_key.values())
     ack_sources = report_ack_scans(view_list, pending)
+    for src, dst, count in trackers.syn_flood_alerts(flow_views_by_key):
+        timestamp = datetime.now().isoformat()
+        desc = f"SYN FLOOD ({count} half-open)"
+        alert = {"timestamp": timestamp, "kind": "syn_flood", "description": desc, "source": src, "destination": dst, "num_flows": count, "num_ports": 1, "model_verdict": "syn_flood", "confidence": None}
+        pending.append((alert, f"{desc} {src} -> {dst}"))
     evasion_sources = set(stealth_sources)
     for ack_source in ack_sources:
         evasion_sources.add(ack_source)
