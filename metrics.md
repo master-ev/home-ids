@@ -1,6 +1,6 @@
 # Home IDS - Metrics
 
-Generated 2026-09-25 21:18 at commit `79b0aa2` (+ uncommitted changes) by `metrics_report.py`.
+Generated 2026-09-25 22:23 at commit `0abf816` (+ uncommitted changes) by `metrics_report.py`.
 
 > **How to read this.** Each capture is replayed through the live pipeline
 > (`live_ids.analyze_window`: model + 0.70 filter + aggregation + trackers).
@@ -16,7 +16,7 @@ Generated 2026-09-25 21:18 at commit `79b0aa2` (+ uncommitted changes) by `metri
 
 - **Unseen attack captures**: detected 11/11, correctly labelled 9/11
 - **In-training attack captures**: detected 12/12, correctly labelled 12/12
-- **Attack alerts**: 180 logged, 45 notified (cooldown 60 s per source/destination/family)
+- **Attack alerts**: 188 logged, 45 notified (cooldown 60 s per source/destination/family)
 - **Expected label shown to the human**: 21/23 attack captures
 - **Attack captures with wrong labels in log**: 0/23
 - **Normal captures with any alert**: 0/10 (0 alerts total)
@@ -35,8 +35,8 @@ Generated 2026-09-25 21:18 at commit `79b0aa2` (+ uncommitted changes) by `metri
 | decoy2_router.pcap | port_scan | yes | yes | yes | yes | - | 16 | 4 | distributed_scan x1, port_scan x3 | distributed_scan x1, port_scan x12, slow_scan x3 |
 | udp_scan1.pcap | udp_scan | yes | yes | yes | yes | - | 13 | 2 | distributed_scan x1, udp_scan x1 | distributed_scan x1, slow_scan x1, udp_scan x11 |
 | udp_scan2.pcap | udp_scan | yes | yes | yes | yes | - | 13 | 2 | distributed_scan x1, udp_scan x1 | distributed_scan x1, slow_scan x1, udp_scan x11 |
-| syn_flood1.pcap | syn_flood | yes | yes | yes | yes | - | 4 | 1 | syn_flood x1 | syn_flood x4 |
-| syn_flood2.pcap | syn_flood | yes | yes | yes | yes | - | 4 | 1 | syn_flood x1 | syn_flood x4 |
+| syn_flood1.pcap | syn_flood | yes | yes | yes | yes | - | 8 | 1 | syn_flood x1 | syn_flood x8 |
+| syn_flood2.pcap | syn_flood | yes | yes | yes | yes | - | 8 | 1 | syn_flood x1 | syn_flood x8 |
 | stealth_sX.pcap | stealth_scan | no | yes | yes | yes | - | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
 | stealth_sN.pcap | stealth_scan | no | yes | yes | yes | - | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
 | stealth_sF.pcap | stealth_scan | no | yes | yes | yes | - | 4 | 2 | distributed_scan x1, stealth_scan x1 | distributed_scan x1, slow_scan x1, stealth_scan x2 |
@@ -70,7 +70,7 @@ so for them this is in-sample. `dns_normal.pcap` is held out.
 ## Tests
 
 ```
-1 failed, 227 passed in 93.23s (0:01:33)
+234 passed in 96.57s (0:01:36)
 ```
 
 ## LOCO (model generalization, last lines)
