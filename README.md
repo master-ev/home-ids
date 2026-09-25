@@ -50,6 +50,46 @@ Alerts are then aggregated: alerts → incidents (same source, type, time window
 campaigns (multi-source, multi-stage), with severity and aggregated confidence.
 The dashboard shows incidents and campaigns, never raw alerts.
 
+                         ┌─────────────┐
+   tcpdump / sniff  ───► │   packets   │
+                         └──────┬──────┘
+                                │  one-pass field extraction (packet_view)
+                         ┌──────▼──────┐
+                         │    views    │
+                         └──────┬──────┘
+                    ┌───────────┼───────────────────────┐
+                    │           │                        │
+              flows (per key)   │                  whole-window scan
+                    │           │                        │
+         ┌──────────▼───┐  ┌────▼─────────┐   ┌──────────▼──────────┐
+         │  features +  │  │  DETERMINISTIC│   │   DETERMINISTIC     │
+         │   context    │  │   TRACKERS    │   │   packet trackers   │
+         └──────┬───────┘  │ (per flow)    │   │ fragment, icmp,     │
+                │          │ syn_flood,    │   │ stealth (NULL/FIN/  │
+       ┌────────┼──────┐   │ slowloris,    │   │ XMAS)               │
+       │        │      │   │ ack_scan      │   └──────────┬──────────┘
+  ┌────▼───┐ ┌──▼───┐  │   └───────┬───────┘              │
+  │ RANDOM │ │ISOLA-│  │           │                      │
+  │ FOREST │ │TION  │  │           │                      │
+  │ (class)│ │FOREST│  │           │                      │
+  └────┬───┘ └──┬───┘  │           │                      │
+       │        │      │           │                      │
+       └────────┴──────┴───────────┴──────────────────────┘
+                                │
+                    ┌───────────▼───────────┐
+                    │   alert policy         │
+                    │  (family, cooldown,    │
+                    │   confidence >= 0.70)  │
+                    └───────────┬───────────┘
+                                │
+                         alerts.jsonl ─► incidents ─► dashboard
+
+   THREE COMPLEMENTARY PARADIGMS:
+   1. Classification (Random Forest)  — known attacks with a learned signature
+   2. Deterministic trackers          — structural/temporal attacks (scan, flood,
+                                         slowloris, stealth, fragmentation)
+   3. Anomaly detection (Isolation Forest) — what is simply unusual
+
 ### The third layer, measured
 
 The anomaly layer is meant to catch what the other two have never seen. Measured
