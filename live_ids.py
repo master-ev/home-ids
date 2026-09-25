@@ -20,6 +20,10 @@ from trackers import detect_stealth_scans, detect_ack_scans, is_lone_ack_probe
 from scenarios import CAPTURES
 from labels import choose_campaign_label, ANOMALY_VERDICT
 from batch_predict import (build_feature_frame, predict_labels_batch, predict_anomalies_batch,)
+import capture_stats
+from scapy.all import AsyncSniffer
+
+MEASURE_DEFAULT_WINDOWS = 12
 
 def require_file(path, hint):
     if not os.path.exists(path):
@@ -463,6 +467,44 @@ def write_session(session_path, session):
     with open(session_path, "w") as f:
         json.dump(session, f, indent=2)
 
+def parse_measure_argument(argv):
+    if "--measure" not in argv:
+        return None
+    flag_index = argv.index("--measure")
+    value_index = flag_index + 1
+    if value_index >= len(argv):
+        return MEASURE_DEFAULT_WINDOWS
+    return int(argv[value_index])
+
+def run_measure(window_count):
+    global INTERFACE
+    INTERFACE = active_interface(ROUTER_IP)
+    print(f"Auto-detected interface: {INTERFACE}")
+    load_models()
+    print(f"Measuring {window_count} windows of {WINDOW_SECONDS}s on {INTERFACE}")
+    print("Start your traffic generator now.\n")
+    sniffer = AsyncSniffer(iface=INTERFACE, filter="tcp or udp or icmp")
+    sniffer.start()
+    windows_done = 0
+    total_packets = 0
+    slowest_window_ms = 0.0
+    while windows_done < window_count:
+        window_started = datetime.now()
+        packets = sniff(iface=INTERFACE, timeout=WINDOW_SECONDS, filter="tcp or udp or icmp")
+        analyze_window(packets)
+        elapsed_ms = (datetime.now() - window_started).total_seconds() * 1000.0
+        if elapsed_ms > slowest_window_ms:
+            slowest_window_ms = elapsed_ms
+        total_packets = total_packets + len(packets)
+        windows_done = windows_done + 1
+        print(f"  window {windows_done}/{window_count}: " f"{len(packets)} packets, {round(elapsed_ms)} ms")
+    received, dropped = capture_stats.read_drop_stats(sniffer)
+    sniffer.stop()
+    print("")
+    print(capture_stats.format_drop_report(received, dropped))
+    print(f"pipeline saw {total_packets} packets across {window_count} windows")
+    print(f"slowest window: {round(slowest_window_ms)} ms (budget " f"{WINDOW_SECONDS * 1000} ms)")
+
 def run_live(log_path):
     global INTERFACE, ALERT_LOG
     INTERFACE = active_interface(ROUTER_IP)
@@ -503,9 +545,17 @@ def run_live(log_path):
             end_text = datetime.now().isoformat()
             session["last_update"] = end_text
             session["end"] = end_text
-            write_session(session_path, session)
-            print(f"Session saved: {session['windows']} windows, {session['packets']} packets")
+            try:
+                write_session(session_path, session)
+                print(f"Session saved: {session['windows']} windows, {session['packets']} packets")
+            except KeyboardInterrupt:
+                write_session(session_path, session)
+                raise
 
 if __name__ == "__main__":
-    log_argument = parse_log_argument(sys.argv)
-    run_live(log_argument)
+    measure_windows = parse_measure_argument(sys.argv)
+    if measure_windows is not None:
+        run_measure(measure_windows)
+    else:
+        log_argument = parse_log_argument(sys.argv)
+        run_live(log_argument)
