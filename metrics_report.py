@@ -7,6 +7,7 @@ from datetime import datetime
 import live_ids
 from replay import replay_to_log
 from scenarios import CAPTURES
+import live_report
 
 REPORT_PATH = "metrics.md"
 TEMP_LOG_NAME = "metrics_alerts.jsonl"
@@ -357,6 +358,10 @@ def build_report(attack_results, normal_results, pytest_lines, loco_lines):
             lines.append(line)
         lines.append("```")
         lines.append("")
+    live_results = live_report.load_live_results(live_report.LIVE_RESULTS_PATH)
+    live_section = live_report.build_live_section(live_results)
+    lines.append(live_section)
+    lines.append("")
     return "\n".join(lines)
 
 def main():
