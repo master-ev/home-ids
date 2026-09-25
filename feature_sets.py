@@ -43,11 +43,7 @@ def get_feature_set(set_name):
         for name in base:
             if not is_risky_feature(name) and name not in REPLY_FLAG_FEATURES:
                 kept.append(name)
-        if set_name == SET_FORWARD_CONTEXT:
-            for name in base:
-                if not is_risky_feature(name) and name not in REPLY_FLAG_FEATURES:
-                    kept.append(name)
-            return kept + CONTEXT_FEATURES + PROTOCOL_FEATURES
+        return kept + CONTEXT_FEATURES + PROTOCOL_FEATURES
     raise ValueError(f"Unknown feature set: {set_name}")
 
 def clean_features(frame):
