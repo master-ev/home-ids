@@ -1,6 +1,6 @@
 import pandas as pd
 from scapy.all import rdpcap
-from collections import defaultdict, Counter
+from collections import defaultdict
 from sklearn.ensemble import IsolationForest
 from features import get_ips_ports, flow_key, compute_rich_features
 

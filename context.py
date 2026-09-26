@@ -4,11 +4,9 @@ CONTEXT_WINDOW_SECONDS = 5
 NO_PORT = 0
 UNKNOWN_HOST = "unknown"
 CONTEXT_FEATURES = ["ctx_src_flows", "ctx_src_ports", "ctx_src_dsts", "ctx_flows_per_port", "ctx_dst_sources", "ctx_reply_rate",]
-
 NO_PORT_CTX = 0
 
 def flow_got_reply(packets):
-    from scapy.all import TCP as _TCP, UDP as _UDP
     first = packets[0]
     if not first.haslayer(IP):
         return False

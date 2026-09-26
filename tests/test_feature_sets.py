@@ -1,4 +1,13 @@
+import os
+import pytest
 import feature_sets
+
+ORIGINAL_MODEL = "my_model.joblib"
+
+pytestmark = pytest.mark.skipif(
+    not os.path.exists(ORIGINAL_MODEL),
+    reason="my_model.joblib is gitignored; feature sets load base features from it",
+)
 
 def test_no_feature_set_has_duplicates():
     for set_name in feature_sets.ALL_SETS:

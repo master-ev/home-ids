@@ -2,7 +2,6 @@ from collections import defaultdict
 import pandas as pd
 from scapy.all import rdpcap
 from context import CONTEXT_FEATURES, compute_context
-from feature_sets import MISSING_VALUE, load_base_features
 from features import compute_rich_features, flow_key, get_ips_ports
 from scenarios import CAPTURES
 from feature_sets import MISSING_VALUE, load_base_features, PROTOCOL_FEATURES

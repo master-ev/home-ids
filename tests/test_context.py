@@ -52,7 +52,6 @@ def test_empty_input():
     assert ctx.compute_context([]) == []
 
 def test_reply_rate_high_when_replies_present():
-    flow_with_reply = [make_flow(ATTACKER, TARGET, FIRST_CLIENT_PORT, SAME_PORT, 0)[0],]
     from scapy.all import IP, TCP
     request = IP(src=ATTACKER, dst=TARGET) / TCP(sport=FIRST_CLIENT_PORT, dport=SAME_PORT, flags="S")
     request.time = BASE_TIME

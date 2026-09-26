@@ -1,5 +1,4 @@
 import json
-import pytest
 import incidents as inc
 
 SOME_TIMESTAMP = 1789000000.0

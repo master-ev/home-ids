@@ -1,0 +1,346 @@
+F811 [*] Redefinition of unused `MISSING_VALUE` from line 5
+  --> build_dataset_v2.py:8:26
+   |
+ 3 | from scapy.all import rdpcap
+ 4 | from context import CONTEXT_FEATURES, compute_context
+ 5 | from feature_sets import MISSING_VALUE, load_base_features
+   |                          ------------- previous definition of `MISSING_VALUE` here
+ 6 | from features import compute_rich_features, flow_key, get_ips_ports
+ 7 | from scenarios import CAPTURES
+ 8 | from feature_sets import MISSING_VALUE, load_base_features, PROTOCOL_FEATURES
+   |                          ^^^^^^^^^^^^^ `MISSING_VALUE` redefined here
+ 9 |
+10 | OUTPUT_PATH = "my_dataset_v2.csv"
+   |
+help: Remove definition: `MISSING_VALUE`
+  |
+7 | from scenarios import CAPTURES
+  - from feature_sets import MISSING_VALUE, load_base_features, PROTOCOL_FEATURES
+8 + from feature_sets import PROTOCOL_FEATURES
+9 |
+  |
+
+F811 [*] Redefinition of unused `load_base_features` from line 5
+  --> build_dataset_v2.py:8:41
+   |
+ 3 | from scapy.all import rdpcap
+ 4 | from context import CONTEXT_FEATURES, compute_context
+ 5 | from feature_sets import MISSING_VALUE, load_base_features
+   |                                         ------------------ previous definition of `load_base_features` here
+ 6 | from features import compute_rich_features, flow_key, get_ips_ports
+ 7 | from scenarios import CAPTURES
+ 8 | from feature_sets import MISSING_VALUE, load_base_features, PROTOCOL_FEATURES
+   |                                         ^^^^^^^^^^^^^^^^^^ `load_base_features` redefined here
+ 9 |
+10 | OUTPUT_PATH = "my_dataset_v2.csv"
+   |
+help: Remove definition: `load_base_features`
+  |
+7 | from scenarios import CAPTURES
+  - from feature_sets import MISSING_VALUE, load_base_features, PROTOCOL_FEATURES
+8 + from feature_sets import PROTOCOL_FEATURES
+9 |
+  |
+
+F401 [*] `scapy.all.conf` imported but unused
+ --> capture_stats.py:1:23
+  |
+1 | from scapy.all import conf
+  |                       ^^^^
+2 |
+3 | def read_drop_stats(sniffer):
+  |
+help: Remove unused import: `scapy.all.conf`
+  |
+  - from scapy.all import conf
+1 |
+  |
+
+F541 [*] f-string without any placeholders
+  --> check_srcport.py:63:11
+   |
+61 |     print(f"  Ports actually probed (no-ACK packets): {len(probe_ports)}")
+62 |     print(f"  Max distinct dports the trackers see per (src,dst): {best_pair}")
+63 |     print(f"  Sample flows as the pipeline sees them:")
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+64 |     for sample in samples:
+65 |         print("    " + sample)
+   |
+help: Remove extraneous `f` prefix
+   |
+62 |     print(f"  Max distinct dports the trackers see per (src,dst): {best_pair}")
+   -     print(f"  Sample flows as the pipeline sees them:")
+63 +     print("  Sample flows as the pipeline sees them:")
+64 |     for sample in samples:
+   |
+
+F401 [*] `scapy.all.TCP` imported but unused
+  --> context.py:11:34
+   |
+10 | def flow_got_reply(packets):
+11 |     from scapy.all import TCP as _TCP, UDP as _UDP
+   |                                  ^^^^
+12 |     first = packets[0]
+13 |     if not first.haslayer(IP):
+   |
+help: Remove unused import
+   |
+10 | def flow_got_reply(packets):
+   -     from scapy.all import TCP as _TCP, UDP as _UDP
+11 |     first = packets[0]
+   |
+
+F401 [*] `scapy.all.UDP` imported but unused
+  --> context.py:11:47
+   |
+10 | def flow_got_reply(packets):
+11 |     from scapy.all import TCP as _TCP, UDP as _UDP
+   |                                               ^^^^
+12 |     first = packets[0]
+13 |     if not first.haslayer(IP):
+   |
+help: Remove unused import
+   |
+10 | def flow_got_reply(packets):
+   -     from scapy.all import TCP as _TCP, UDP as _UDP
+11 |     first = packets[0]
+   |
+
+F401 [*] `collections.Counter` imported but unused
+ --> legacy/anomaly.py:3:38
+  |
+1 | import pandas as pd
+2 | from scapy.all import rdpcap
+3 | from collections import defaultdict, Counter
+  |                                      ^^^^^^^
+4 | from sklearn.ensemble import IsolationForest
+5 | from features import get_ips_ports, flow_key, compute_rich_features
+  |
+help: Remove unused import: `collections.Counter`
+  |
+2 | from scapy.all import rdpcap
+  - from collections import defaultdict, Counter
+3 + from collections import defaultdict
+4 | from sklearn.ensemble import IsolationForest
+  |
+
+F401 [*] `numpy` imported but unused
+ --> legacy/train.py:2:17
+  |
+1 | # train a Random Forest
+2 | import numpy as np
+  |                 ^^
+3 |
+4 | from imblearn.over_sampling import SMOTE
+  |
+help: Remove unused import: `numpy`
+  |
+1 | # train a Random Forest
+  - import numpy as np
+2 |
+  |
+
+F401 [*] `json` imported but unused
+ --> target_server.py:2:8
+  |
+1 | from http.server import HTTPServer, BaseHTTPRequestHandler
+2 | import json
+  |        ^^^^
+3 |
+4 | class LoginHandler(BaseHTTPRequestHandler):
+  |
+help: Remove unused import: `json`
+  |
+1 | from http.server import HTTPServer, BaseHTTPRequestHandler
+  - import json
+2 |
+  |
+
+F841 Local variable `body` is assigned to but never used
+ --> target_server.py:7:9
+  |
+5 |     def do_POST(self):
+6 |         length = int(self.headers.get("Content-Length", 0))
+7 |         body = self.rfile.read(length)
+  |         ^^^^
+8 |         self.send_response(401)
+9 |         self.end_headers()
+  |
+help: Remove assignment to unused variable `body`
+
+F841 Local variable `flow_with_reply` is assigned to but never used
+  --> tests/test_context.py:55:5
+   |
+54 | def test_reply_rate_high_when_replies_present():
+55 |     flow_with_reply = [make_flow(ATTACKER, TARGET, FIRST_CLIENT_PORT, SAME_PORT, 0)[0],]
+   |     ^^^^^^^^^^^^^^^
+56 |     from scapy.all import IP, TCP
+57 |     request = IP(src=ATTACKER, dst=TARGET) / TCP(sport=FIRST_CLIENT_PORT, dport=SAME_PORT, flags="S")
+   |
+help: Remove assignment to unused variable `flow_with_reply`
+
+F401 [*] `pytest` imported but unused
+ --> tests/test_incidents_helpers.py:2:8
+  |
+1 | import json
+2 | import pytest
+  |        ^^^^^^
+3 | import incidents as inc
+  |
+help: Remove unused import: `pytest`
+  |
+1 | import json
+  - import pytest
+2 | import incidents as inc
+  |
+
+F401 [*] `pytest` imported but unused
+ --> tests/test_packet_view.py:1:8
+  |
+1 | import pytest
+  |        ^^^^^^
+2 | from scapy.all import IP, TCP, UDP, ICMP, Ether, Raw
+3 | import packet_view
+  |
+help: Remove unused import: `pytest`
+  |
+  - import pytest
+1 | from scapy.all import IP, TCP, UDP, ICMP, Ether, Raw
+  |
+
+F401 [*] `json` imported but unused
+ --> tests/test_pipeline.py:1:8
+  |
+1 | import json
+  |        ^^^^
+2 | import os
+3 | import pytest
+  |
+help: Remove unused import: `json`
+  |
+  - import json
+1 | import os
+  |
+
+F401 [*] `labels.SCAN_VERDICT` imported but unused
+ --> tests/test_properties.py:3:72
+  |
+1 | from hypothesis import given, strategies as st
+2 | from alert_policy import (family_of, specificity_of, cooldown_allows, episode_starts, SPECIFICITY_GENERIC, SPECIFICITY_SPECIFIC, KIND_F…
+3 | from labels import choose_campaign_label, flows_per_port, DOS_VERDICT, SCAN_VERDICT
+  |                                                                        ^^^^^^^^^^^^
+4 | from trackers import held_open_connections, persistent_connections
+  |
+help: Remove unused import: `labels.SCAN_VERDICT`
+  |
+2 | from alert_policy import (family_of, specificity_of, cooldown_allows, episode_starts, SPECIFICITY_GENERIC, SPECIFICITY_SPECIFIC, KIND_FAMILY)
+  - from labels import choose_campaign_label, flows_per_port, DOS_VERDICT, SCAN_VERDICT
+3 + from labels import choose_campaign_label, flows_per_port, DOS_VERDICT
+4 | from trackers import held_open_connections, persistent_connections
+  |
+
+F811 [*] Redefinition of unused `family_of` from line 2
+ --> tests/test_soak_report.py:3:26
+  |
+1 | from soak_report import rate_per_hour, session_hours, count_families, is_valid_session
+2 | from alert_policy import family_of
+  |                          --------- previous definition of `family_of` here
+3 | from alert_policy import family_of
+  |                          ^^^^^^^^^ `family_of` redefined here
+4 | from live_ids import SESSION_SUFFIX
+  |
+help: Remove definition: `family_of`
+  |
+2 | from alert_policy import family_of
+  - from alert_policy import family_of
+3 | from live_ids import SESSION_SUFFIX
+  |
+
+F401 [*] `alert_policy.family_of` imported but unused
+ --> tests/test_soak_report.py:3:26
+  |
+1 | from soak_report import rate_per_hour, session_hours, count_families, is_valid_session
+2 | from alert_policy import family_of
+3 | from alert_policy import family_of
+  |                          ^^^^^^^^^
+4 | from live_ids import SESSION_SUFFIX
+  |
+help: Remove unused import: `alert_policy.family_of`
+  |
+2 | from alert_policy import family_of
+  - from alert_policy import family_of
+3 | from live_ids import SESSION_SUFFIX
+  |
+
+F401 [*] `live_ids.SESSION_SUFFIX` imported but unused
+ --> tests/test_soak_report.py:4:22
+  |
+2 | from alert_policy import family_of
+3 | from alert_policy import family_of
+4 | from live_ids import SESSION_SUFFIX
+  |                      ^^^^^^^^^^^^^^
+5 |
+6 | TWO_HOURS_START = "2026-09-22T20:00:00"
+  |
+help: Remove unused import: `live_ids.SESSION_SUFFIX`
+  |
+3 | from alert_policy import family_of
+  - from live_ids import SESSION_SUFFIX
+4 |
+  |
+
+F811 [*] Redefinition of unused `live_ids` from line 2
+ --> tests/test_throttle.py:3:8
+  |
+1 | import pytest
+2 | import live_ids
+  |        -------- previous definition of `live_ids` here
+3 | import live_ids
+  |        ^^^^^^^^ `live_ids` redefined here
+4 | from alert_policy import (specificity_of, flush_window_alerts, family_of, cooldown_allows, emit_alert, ALERT_COOLDOWN_SECONDS, SPECIFIC…
+5 | from replay import read_logged_alerts
+  |
+help: Remove definition: `live_ids`
+  |
+2 | import live_ids
+  - import live_ids
+3 | from alert_policy import (specificity_of, flush_window_alerts, family_of, cooldown_allows, emit_alert, ALERT_COOLDOWN_SECONDS, SPECIFICITY_GENERIC, SPECIFICITY_SPECIFIC)
+  |
+
+F401 [*] `trackers.SLOWLORIS_MIN_PERSISTENT` imported but unused
+ --> tests/test_trackers.py:3:148
+  |
+1 | …
+2 | …
+3 | …_PORTS, held_open_connections, persistent_connections, SLOWLORIS_MIN_PERSISTENT
+  |                                                         ^^^^^^^^^^^^^^^^^^^^^^^^
+4 | …
+  |
+help: Remove unused import: `trackers.SLOWLORIS_MIN_PERSISTENT`
+  |
+2 | import trackers
+  - from trackers import counts_as_scan_probe, is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS, held_open_connections, persistent_connections, SLOWLORIS_MIN_PERSISTENT
+3 + from trackers import counts_as_scan_probe, is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS, held_open_connections, persistent_connections
+4 | from live_ids import slowloris_triple
+  |
+
+F401 [*] `scapy.all.UDP` imported but unused
+ --> trackers.py:3:32
+  |
+1 | from collections import defaultdict
+2 |
+3 | from scapy.all import IP, TCP, UDP
+  |                                ^^^
+4 |
+5 | from packet_view import TCP_PROTO, VIEW_DPORT, VIEW_DST, VIEW_FLAGS, VIEW_PROTO, VIEW_SRC
+  |
+help: Remove unused import: `scapy.all.UDP`
+  |
+2 |
+  - from scapy.all import IP, TCP, UDP
+3 + from scapy.all import IP, TCP
+4 |
+  |
+
+Found 21 errors.
+[*] 19 fixable with the `--fix` option (2 hidden fixes can be enabled with the `--unsafe-fixes` option).

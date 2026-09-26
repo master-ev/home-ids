@@ -1,4 +1,3 @@
-import pytest
 from scapy.all import IP, TCP, UDP, ICMP, Ether, Raw
 import packet_view
 from packet_view import (VIEW_DPORT, VIEW_DST, VIEW_FLAGS, VIEW_PAYLOAD, VIEW_PROTO, VIEW_SPORT, VIEW_SRC, build_view, build_views, tcp_views)

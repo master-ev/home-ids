@@ -1,6 +1,5 @@
 import pytest
 import live_ids
-import live_ids
 from alert_policy import (specificity_of, flush_window_alerts, family_of, cooldown_allows, emit_alert, ALERT_COOLDOWN_SECONDS, SPECIFICITY_GENERIC, SPECIFICITY_SPECIFIC)
 from replay import read_logged_alerts
 
@@ -82,20 +81,17 @@ def test_evasion_after_recon_is_notified(throttle_log):
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 2
 
-
 def test_recon_after_evasion_is_covered(throttle_log):
     emit_alert(make_alert("stealth_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
     emit_alert(make_alert("slow_scan", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 1
 
-
 def test_flood_after_recon_is_notified(throttle_log):
     emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)
     emit_alert(make_alert("dos", ATTACKER), "test", START_TIME + SMALL_STEP, live_ids.log_alert)
     alerts = read_logged_alerts(throttle_log)
     assert count_notified(alerts) == 2
-
 
 def test_unknown_kinds_never_merge(throttle_log):
     emit_alert(make_alert(UNMAPPED_KIND_A, ATTACKER), "test", START_TIME, live_ids.log_alert)
@@ -147,7 +143,6 @@ def test_same_family_detectors_notified_once(throttle_log):
     alerts = read_logged_alerts(throttle_log)
     assert len(alerts) == 2
     assert count_notified(alerts) == 1
-
 
 def test_next_notice_lists_silent_detectors(throttle_log):
     emit_alert(make_alert("port_scan", ATTACKER), "test", START_TIME, live_ids.log_alert)

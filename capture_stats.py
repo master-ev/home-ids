@@ -1,5 +1,3 @@
-from scapy.all import conf
-
 def read_drop_stats(sniffer):
     socket = getattr(sniffer, "L2socket", None)
     if socket is None:

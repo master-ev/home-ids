@@ -1,6 +1,6 @@
 from hypothesis import given, strategies as st
 from alert_policy import (family_of, specificity_of, cooldown_allows, episode_starts, SPECIFICITY_GENERIC, SPECIFICITY_SPECIFIC, KIND_FAMILY)
-from labels import choose_campaign_label, flows_per_port, DOS_VERDICT, SCAN_VERDICT
+from labels import choose_campaign_label, flows_per_port, DOS_VERDICT
 from trackers import held_open_connections, persistent_connections
 
 MAX_FLOWS = 5000

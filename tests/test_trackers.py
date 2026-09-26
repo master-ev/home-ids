@@ -1,6 +1,6 @@
 from scapy.all import IP, TCP, ICMP, Ether
 import trackers
-from trackers import counts_as_scan_probe, is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS, held_open_connections, persistent_connections, SLOWLORIS_MIN_PERSISTENT
+from trackers import counts_as_scan_probe, is_lone_ack_probe, detect_ack_scans, ACK_SCAN_MIN_PORTS, held_open_connections, persistent_connections
 from live_ids import slowloris_triple
 
 FROM_SCANNER = True

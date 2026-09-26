@@ -1,6 +1,4 @@
 # train a Random Forest
-import numpy as np
-
 from imblearn.over_sampling import SMOTE
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score

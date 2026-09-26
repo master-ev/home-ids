@@ -1,4 +1,3 @@
-import json
 import os
 import pytest
 from scapy.all import rdpcap

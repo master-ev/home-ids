@@ -60,9 +60,9 @@ def diagnose(path):
     print(f"  TCP flows: {tcp_flows}   flows with source port < 1024: {low_source_ports}")
     print(f"  Ports actually probed (no-ACK packets): {len(probe_ports)}")
     print(f"  Max distinct dports the trackers see per (src,dst): {best_pair}")
-    print(f"  Sample flows as the pipeline sees them:")
+    print("  Sample flows as the pipeline sees them:")
     for sample in samples:
-        print("    " + sample)
+        print(sample)
     print()
 
 def main():
