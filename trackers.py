@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from scapy.all import IP, TCP, UDP
+from scapy.all import IP, TCP
 
 from packet_view import TCP_PROTO, VIEW_DPORT, VIEW_DST, VIEW_FLAGS, VIEW_PROTO, VIEW_SRC
 
