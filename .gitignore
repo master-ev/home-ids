@@ -21,3 +21,7 @@ demo_part.jsonl
 soak_normal_*.csv
 profile_run.out
 live_section.md
+alerts_backup_*.jsonl
+flows.csv
+my_dataset.csv
+notes/bench/
